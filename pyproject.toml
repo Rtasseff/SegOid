@@ -39,16 +39,16 @@ dev = [
 ]
 
 [project.scripts]
-validate_dataset = "segoid.cli:validate_dataset"
-make_splits = "segoid.cli:make_splits"
-sanity_check = "segoid.cli:sanity_check"
-train = "segoid.cli:train"
-predict_full = "segoid.cli:predict_full"
-quantify_objects = "segoid.cli:quantify_objects"
+validate_dataset = "src.cli:validate_dataset"
+make_splits = "src.cli:make_splits"
+sanity_check = "src.cli:sanity_check"
+train = "src.cli:train"
+predict_full = "src.cli:predict_full"
+quantify_objects = "src.cli:quantify_objects"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["segoid*"]
+include = ["src*"]
 
 [tool.black]
 line-length = 100

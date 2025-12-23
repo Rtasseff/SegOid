@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Strategic context:** This is designed as general-purpose infrastructure for cell microscopy segmentation, not just spheroids. The architecture supports future extension to 2D cell cultures, organoids, and variable imaging conditions.
 
-**Current status:** Phase 0 (Project bootstrap) - Complete. Package structure and CLI placeholders implemented.
+**Current status:** Phase 0 (Project bootstrap) - Complete. Package structure (src/) and CLI placeholders implemented per SDD.
 
 ## Development Commands
 
@@ -65,7 +65,7 @@ pytest
 pytest tests/test_dataset.py
 
 # Run with coverage
-pytest --cov=segoid tests/
+pytest --cov=src tests/
 ```
 
 ## Architecture
@@ -83,7 +83,7 @@ project/
   runs/                     # Training outputs, checkpoints, TensorBoard logs
   inference/                # Full-image predictions
   metrics/                  # Object tables and summary plots
-  segoid/                   # Python package
+  src/                      # Python package
   configs/                  # YAML configuration files
   docs/                     # Documentation (SDD.md)
   notebooks/                # Optional exploratory notebooks

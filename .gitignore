@@ -51,10 +51,10 @@ working/
 splits/*.csv
 !splits/README.md
 
-# Training outputs
-runs/
-inference/
-metrics/
+# Training outputs (at project root, not source code)
+/runs/
+/inference/
+/metrics/
 
 # Model checkpoints (too large for git)
 *.pth
