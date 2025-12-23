@@ -121,7 +121,7 @@ Split rule: split **by image**, not by patches, to prevent data leakage.
 * Python virtual environment:
   * macOS: `python -m venv .venv`
   * Linux: same, with CUDA-enabled PyTorch
-* Dependencies specified in `pyproject.toml` (preferred) or `requirements.txt`
+* Dependencies specified in `pyproject.toml` 
 
 ## 5. System overview (phases)
 
