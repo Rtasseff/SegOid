@@ -53,12 +53,13 @@ This motivates the CNN-based approach over classical image analysis methods that
 
 ```
 project/
-  raw/                      # original microscope exports (never edited)
-  working/
-    images/                 # standardized 8-bit copies for labeling + ML
-    masks/                  # final binary masks (0/255) aligned to images
-    rois/                   # optional Fiji ROI Manager exports
-  splits/                   # train/val/test manifests (CSV)
+  data/                     # data directory (not committed to git)
+    raw/                    # original microscope exports (never edited)
+    working/
+      images/               # standardized 8-bit copies for labeling + ML
+      masks/                # final binary masks (0/255) aligned to images
+      rois/                 # optional Fiji ROI Manager exports
+    splits/                 # train/val/test manifests (CSV)
   runs/                     # training outputs, checkpoints, logs
   inference/                # full-image predictions
   metrics/                  # object tables and summary plots
@@ -80,8 +81,8 @@ Constraint: for any image `X.tif`, the corresponding mask must be `X_mask.tif`.
 
 Explicit manifests for reproducibility:
 
-* `splits/all.csv` — complete dataset inventory
-* `splits/train.csv`, `splits/val.csv`, `splits/test.csv`
+* `data/splits/all.csv` — complete dataset inventory
+* `data/splits/train.csv`, `data/splits/val.csv`, `data/splits/test.csv`
 
 Each row contains:
 
@@ -162,9 +163,9 @@ Split rule: split **by image**, not by patches, to prevent data leakage.
 
 ### 7.1 Dataset validation
 
-For every image in `working/images/`:
+For every image in `data/working/images/`:
 
-1. **Pairing check:** Corresponding mask exists in `working/masks/` with correct naming
+1. **Pairing check:** Corresponding mask exists in `data/working/masks/` with correct naming
 2. **Dimension check:** Image and mask have identical (H, W)
 3. **Format check:** Mask is binary (0/255) or convertible via thresholding
 4. **Coverage computation:** Calculate `mask_coverage = foreground_pixels / total_pixels`
@@ -180,7 +181,7 @@ Images with zero mask coverage require explicit confirmation:
 
 ### 7.3 QC report
 
-Generate `splits/qc_report.csv` containing per-image:
+Generate `data/splits/qc_report.csv` containing per-image:
 
 * All manifest columns
 * Validation status (pass/fail with reason)
@@ -202,13 +203,13 @@ Console summary:
 **Implementation:**
 
 * Module: `src/data/validate.py`
-* CLI command: `validate_dataset --input-dir working/ --output-dir splits/`
-* CLI command: `make_splits --manifest splits/all.csv --seed 42 --output-dir splits/`
+* CLI command: `validate_dataset --input-dir data/working/ --output-dir data/splits/`
+* CLI command: `make_splits --manifest data/splits/all.csv --seed 42 --output-dir data/splits/`
 
 **Deliverables:**
 
-* `splits/all.csv`, `splits/train.csv`, `splits/val.csv`, `splits/test.csv`
-* `splits/qc_report.csv`
+* `data/splits/all.csv`, `data/splits/train.csv`, `data/splits/val.csv`, `data/splits/test.csv`
+* `data/splits/qc_report.csv`
 * Console QC summary
 
 ---
@@ -414,8 +415,8 @@ loss:
   dice_weight: 0.5
 
 data:
-  train_manifest: splits/train.csv
-  val_manifest: splits/val.csv
+  train_manifest: data/splits/train.csv
+  val_manifest: data/splits/val.csv
   patch_size: 256
   patches_per_image: 20
 
@@ -493,7 +494,7 @@ postprocess:
   fill_holes: true
   
 input:
-  manifest: splits/test.csv
+  manifest: data/splits/test.csv
   
 output:
   output_dir: inference/
@@ -596,7 +597,7 @@ If pixel size is known (from microscope metadata):
 ```yaml
 input:
   pred_mask_dir: inference/
-  gt_manifest: splits/test.csv
+  gt_manifest: data/splits/test.csv
 
 analysis:
   min_object_area: 100
@@ -657,7 +658,7 @@ All in `configs/`:
 
 * All code in Git
 * Config snapshots saved with each run
-* Dataset manifests versioned in `splits/`
+* Dataset manifests versioned in `data/splits/`
 
 ### 14.3 Unit tests
 

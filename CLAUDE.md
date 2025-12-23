@@ -29,8 +29,8 @@ pip install -e .
 
 Phase 1 - Data validation and splits:
 ```bash
-validate_dataset --input-dir working/ --output-dir splits/
-make_splits --manifest splits/all.csv --seed 42 --output-dir splits/
+validate_dataset --input-dir data/working/ --output-dir data/splits/
+make_splits --manifest data/splits/all.csv --seed 42 --output-dir data/splits/
 ```
 
 Phase 1.5 - Sanity check:
@@ -74,12 +74,13 @@ pytest --cov=src tests/
 
 ```
 project/
-  raw/                      # Original microscope exports (never edited)
-  working/
-    images/                 # Standardized 8-bit images
-    masks/                  # Binary masks (0/255) aligned to images
-    rois/                   # Optional Fiji ROI exports
-  splits/                   # train/val/test manifests (CSV)
+  data/                     # Data directory (not committed to git)
+    raw/                    # Original microscope exports (never edited)
+    working/
+      images/               # Standardized 8-bit images
+      masks/                # Binary masks (0/255) aligned to images
+      rois/                 # Optional Fiji ROI exports
+    splits/                 # train/val/test manifests (CSV)
   runs/                     # Training outputs, checkpoints, TensorBoard logs
   inference/                # Full-image predictions
   metrics/                  # Object tables and summary plots
@@ -192,7 +193,7 @@ All pipeline stages use YAML configs in `configs/`:
 
 ### Data Manifests
 
-All dataset splits are defined by CSV manifests in `splits/`:
+All dataset splits are defined by CSV manifests in `data/splits/`:
 
 Required columns:
 - `basename` - Filename stem

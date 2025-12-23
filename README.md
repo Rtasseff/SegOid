@@ -30,8 +30,8 @@ Once implemented, the pipeline will provide these commands:
 
 ```bash
 # Phase 1: Data validation and splits
-validate_dataset --input-dir working/ --output-dir splits/
-make_splits --manifest splits/all.csv --seed 42 --output-dir splits/
+validate_dataset --input-dir data/working/ --output-dir data/splits/
+make_splits --manifest data/splits/all.csv --seed 42 --output-dir data/splits/
 
 # Phase 1.5: Sanity check
 sanity_check --config configs/sanity_check.yaml

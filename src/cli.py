@@ -13,8 +13,8 @@ def validate_dataset():
     parser = argparse.ArgumentParser(
         description="Validate dataset: check image/mask pairing and compute QC metrics"
     )
-    parser.add_argument("--input-dir", required=True, help="Path to working/ directory")
-    parser.add_argument("--output-dir", required=True, help="Path to splits/ directory")
+    parser.add_argument("--input-dir", required=True, help="Path to data/working/ directory")
+    parser.add_argument("--output-dir", required=True, help="Path to data/splits/ directory")
     args = parser.parse_args()
 
     print(f"[Phase 1] Validating dataset in {args.input_dir}")
@@ -30,7 +30,7 @@ def make_splits():
     )
     parser.add_argument("--manifest", required=True, help="Path to all.csv manifest")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--output-dir", required=True, help="Path to splits/ directory")
+    parser.add_argument("--output-dir", required=True, help="Path to data/splits/ directory")
     parser.add_argument("--train-ratio", type=float, default=0.7, help="Training set ratio")
     parser.add_argument("--val-ratio", type=float, default=0.15, help="Validation set ratio")
     parser.add_argument("--test-ratio", type=float, default=0.15, help="Test set ratio")

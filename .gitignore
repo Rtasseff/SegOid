@@ -45,11 +45,8 @@ notebooks/
 htmlcov/
 .tox/
 
-# Data directories (never commit raw data)
-raw/
-working/
-splits/*.csv
-!splits/README.md
+# Data directory (never commit raw data)
+/data/
 
 # Training outputs (at project root, not source code)
 /runs/
