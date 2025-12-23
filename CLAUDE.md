@@ -21,7 +21,7 @@ python -m venv .venv
 # Activate environment
 source .venv/bin/activate  # macOS/Linux
 
-# Install dependencies (after pyproject.toml or requirements.txt is created)
+# Install dependencies
 pip install -e .
 ```
 

@@ -4,10 +4,10 @@
 **Last updated:** 2025-01-15
 
 ## Current Status
-**Active Phase:** 0 (Project bootstrap)
-**Last Completed:** Creation of this software design doc (SDD)
+**Active Phase:** 1 (Image curation and dataset splits)
+**Last Completed:** Phase 0 (Project bootstrap)
 **Blocking Issues:** None
-**Next Action:** Read sections 1 to 5 for context and start phase 0
+**Next Action:** Prepare data in data/working/ directory and run Phase 1 validation
 
 ## 1. Problem statement
 
