@@ -197,7 +197,7 @@ Console summary:
 ### 7.4 Split generation
 
 * Deterministic split using fixed random seed
-* Default ratio: 70% train, 15% val, 15% test
+* Default ratio: 60% train, 20% val, 20% test
 * Optional stratification by coverage buckets to ensure balanced foreground representation
 
 **Implementation:**

@@ -49,7 +49,7 @@ Implement dataset validation and split generation: verify image/mask pairing, co
 
 - [ ] Create split logic in `src/data/validate.py` or separate module
 - [ ] Split by image (not patches)
-- [ ] Default ratio: 70% train, 15% val, 15% test
+- [ ] Default ratio: 60% train, 20% val, 20% test
 - [ ] Use deterministic random seed (default: 42)
 - [ ] Optional: stratify by `mask_coverage` buckets
 - [ ] Output: `splits/train.csv`, `splits/val.csv`, `splits/test.csv`
