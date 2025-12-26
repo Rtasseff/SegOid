@@ -1,8 +1,8 @@
 # Current Task
 
 **Project:** SegOid (Spheroid Segmentation Pipeline)  
-**Date:** 2025-12-26  
-**Session:** Phase 5 — Object Identification and Quantification
+**Date:** 2025-12-27  
+**Session:** Phase 6 — Cross-Validation Infrastructure
 
 ---
 
@@ -10,128 +10,123 @@
 
 | Item | Value |
 |------|-------|
-| **Active Phase** | 5 |
-| **Last Completed** | Phase 4 — Tiled inference (test Dice: 0.794, IoU: 0.658) |
+| **Active Phase** | 6 |
+| **Last Completed** | Phase 5 — POC complete (Detection F1: TBD from Phase 5 notes) |
 | **Blocking Issues** | None |
 
 ---
 
-## Context from Phase 4
+## Context
 
-- Predicted masks saved to `inference/test_predictions/`
-- Test set pixel metrics: **Dice 0.794 ± 0.01**, **IoU 0.658 ± 0.01**
-- Excellent generalization: test Dice (0.794) ≈ val Dice (0.799)
-- Best model checkpoint: `runs/train_20251226_135948/checkpoints/best_model.pth`
-- Post-processing applied: small object removal (<100 px²), hole filling
-- Output files:
-  - `*_pred_mask.tif` — binary masks (LZW compressed)
-  - `*_pred_prob.tif` — probability maps (float32)
-  - `pixel_metrics.csv` — per-image Dice/IoU
+**POC Results (Phases 0-5):**
+- Val Dice: 0.799, Test Dice: 0.794
+- Pipeline validated end-to-end
+- Current limitation: trained on only 3 images, validated on 2, tested on 1
+
+**New Goal:** Maximize learning from all 6 labeled images via leave-one-out cross-validation. This provides:
+- More robust performance estimate (mean ± std across 6 folds)
+- 6 trained models (each has seen 5/6 of the data)
+- Foundation for ensemble inference in Phase 7
+
+**Master Plan:** See `docs/FLYWHEEL_MASTER_PLAN.md` for Phases 6-10 overview.
 
 ---
 
 ## Session Goal
 
-Extract individual spheroid objects from segmentation masks, match predicted objects to ground truth objects for instance-level evaluation, and compute morphology metrics for each detected spheroid.
+Implement cross-validation infrastructure: configurable split generation, training orchestration across folds, and result aggregation. All configuration-driven and traceable.
 
 ---
 
 ## Tasks
 
-### 1. Implement connected components extraction
+### 1. Implement CV split generation
 
-- [x] Create `src/analysis/quantify.py` module
-- [x] Implement `extract_objects(mask, min_area)`:
-  - Run connected components labeling (`skimage.measure.label`)
-  - Filter by minimum area
-  - Return labeled image and object count
+- [ ] Create `src/data/cross_validation.py` module
+- [ ] Implement `generate_loocv_splits(manifest, output_dir, seed)`:
+  - Read source manifest (all 6 images)
+  - Generate N fold directories, each with `train.csv` and `val.csv`
+  - Leave-one-out: fold_i trains on all except image_i, validates on image_i
+  - Save `cv_meta.yaml` with fold-to-image mapping
+- [ ] Implement `generate_kfold_splits(manifest, output_dir, n_folds, seed)` (for future flexibility)
 
-### 2. Implement morphology metrics
+### 2. Create CV configuration schema
 
-- [x] Implement `compute_object_properties(labeled_mask, pixel_size=None)`:
-  - Use `skimage.measure.regionprops`
-  - Extract per object:
-    - `object_id`: unique identifier
-    - `area`: pixel count
-    - `perimeter`: boundary length
-    - `equivalent_diameter`: diameter of equal-area circle
-    - `major_axis_length`, `minor_axis_length`: fitted ellipse axes
-    - `eccentricity`: ellipse eccentricity (0=circle)
-    - `circularity`: 4πA/P² (1=perfect circle)
-    - `centroid_x`, `centroid_y`: object center
-    - `bbox_min_row`, `bbox_min_col`, `bbox_max_row`, `bbox_max_col`
-  - Optionally convert to physical units (µm) if `pixel_size` provided
-  - Return DataFrame with one row per object
+- [ ] Create `configs/cv_config.yaml`:
+  ```yaml
+  cv:
+    strategy: leave_one_out  # or k_fold
+    source_manifest: data/splits/all.csv
+    seed: 42
+  
+  training:
+    # Inherited from train.yaml or specified inline
+    epochs: 50
+    batch_size: 4
+    learning_rate: 1.0e-4
+    early_stopping_patience: 10
+    patch_size: 256
+    patches_per_image: 20
+    positive_ratio: 0.7
+  
+  output:
+    cv_dir: runs/cv_001/
+  ```
+- [ ] Implement config loading with defaults and validation
 
-### 3. Implement instance matching
+### 3. Implement CV orchestrator
 
-- [x] Implement `match_objects(pred_labels, gt_labels, iou_threshold=0.5)`:
-  - Compute IoU matrix between all predicted and GT objects
-  - Apply Hungarian algorithm (`scipy.optimize.linear_sum_assignment`)
-  - Reject matches with IoU < threshold
-  - Return: matched pairs, unmatched predictions (FP), unmatched GT (FN)
+- [ ] Implement `run_cross_validation(cv_config_path)`:
+  - Load and validate config
+  - Create CV output directory structure
+  - Save config snapshot
+  - Generate fold splits
+  - Loop through folds:
+    - Generate fold-specific train config
+    - Call existing `train_model()` function
+    - Collect results (best val Dice, best epoch, etc.)
+  - Aggregate results across folds
+  - Save summary statistics
 
-### 4. Implement instance-level evaluation
+### 4. Implement result aggregation
 
-- [x] Implement `compute_instance_metrics(matches, fps, fns)`:
-  - True Positives (TP): count of valid matches
-  - False Positives (FP): predicted objects with no match
-  - False Negatives (FN): GT objects with no match
-  - Precision: TP / (TP + FP)
-  - Recall: TP / (TP + FN)
-  - F1: harmonic mean of precision and recall
-  - Mean Matched IoU: average IoU of true positive matches
-- [x] Generate per-image instance metrics
-- [x] Generate summary across test set
+- [ ] Compute per-fold metrics:
+  - best_val_dice, best_epoch, final_train_dice, training_time
+- [ ] Compute aggregate statistics:
+  - mean, std, min, max for val Dice
+  - identify best and worst performing folds
+- [ ] Save outputs:
+  - `results/fold_metrics.csv` — one row per fold
+  - `results/summary.yaml` — aggregate statistics
 
-### 5. Implement `quantify_objects` CLI command
+### 5. Implement `run_cv` CLI command
 
-- [x] Add to `src/cli.py`
-- [x] Parameters:
-  - `--pred-mask-dir` (required): directory with predicted masks (`inference/test_predictions/`)
-  - `--gt-manifest` (required): path to test manifest CSV
-  - `--output-dir` (default: `metrics/`)
-  - `--min-object-area` (default: 100)
-  - `--iou-threshold` (default: 0.5)
-  - `--pixel-size` (optional): µm per pixel for physical units
-  - `--data-root` (default: `data/`): root for relative paths in manifest
-- [x] Save outputs:
-  - `metrics/per_image/<basename>_objects.csv` — per-object morphology
-  - `metrics/all_objects.csv` — concatenated object table
-  - `metrics/instance_eval.csv` — per-image TP/FP/FN and metrics
-  - `metrics/summary.csv` — dataset-level summary
+- [ ] Add to `src/cli.py`
+- [ ] Parameters:
+  - `--config` (required): path to CV config YAML
+  - `--folds` (optional): specific folds to run (e.g., "0,2,5" for subset)
+  - `--resume` (optional): resume interrupted CV run
+- [ ] Progress output showing fold completion
 
-### 6. Implement visualization
+### 6. Run full CV experiment
 
-- [x] Generate summary plots:
-  - Histogram of spheroid areas
-  - Histogram of equivalent diameters
-  - Histogram of circularity
-  - Scatter plot: predicted vs GT object count per image
-- [x] Save to `metrics/plots/`
+- [ ] Execute 6-fold LOO CV on current dataset
+- [ ] Monitor training (can run overnight if needed)
+- [ ] Document results in Notes section
 
-### 7. Run quantification on test set
+### 7. Unit tests
 
-- [x] Execute on test predictions
-- [x] Review instance metrics and morphology distributions
-- [x] Document results in Notes section
-
-### 8. Unit tests
-
-- [x] Test connected components extraction
-- [x] Test morphology metric computation (known shape → expected values)
-- [x] Test IoU computation between two masks
-- [x] Test Hungarian matching with known IoU matrix
-- [x] Test instance metrics computation
+- [ ] Test LOOCV split generation (correct train/val sizes per fold)
+- [ ] Test k-fold split generation
+- [ ] Test config loading and validation
+- [ ] Test result aggregation computation
 
 ---
 
-## Reference Sections (in docs/SDD.md)
+## Reference Sections
 
-- **Section 12:** Phase 5 full specification
-- **Section 12.2:** Morphology metrics table
-- **Section 12.3:** Instance-level evaluation (matching procedure, metrics)
-- **Section 12.4:** Output file formats
+- **FLYWHEEL_MASTER_PLAN.md:** Phase 6 specification
+- **docs/SDD.md Section 10:** Training configuration (reused for each fold)
 
 ---
 
@@ -139,60 +134,110 @@ Extract individual spheroid objects from segmentation masks, match predicted obj
 
 | File | Action | Notes |
 |------|--------|-------|
-| `src/analysis/quantify.py` | Create | Object extraction, morphology, matching, metrics |
-| `src/cli.py` | Modify | Add `quantify_objects` command |
-| `tests/test_quantify.py` | Create | Unit tests for analysis |
-| `metrics/` | Create dir | Output tables and plots |
-| `metrics/per_image/` | Create dir | Per-image object CSVs |
-| `metrics/plots/` | Create dir | Visualization outputs |
-| `configs/quantify.yaml` | Create (optional) | Analysis parameters |
+| `src/data/cross_validation.py` | Create | Split generation functions |
+| `src/training/cross_validation.py` | Create | CV orchestration and aggregation |
+| `src/cli.py` | Modify | Add `run_cv` command |
+| `configs/cv_config.yaml` | Create | CV configuration template |
+| `tests/test_cross_validation.py` | Create | Unit tests |
+| `docs/FLYWHEEL_MASTER_PLAN.md` | Create | Master plan for Phases 6-10 |
 
 ---
 
 ## Technical Details
 
-### IoU Computation for Objects
+### Output Directory Structure
+
+```
+runs/cv_001/
+  cv_config.yaml              # Config snapshot
+  cv_meta.yaml                # Fold-to-image mapping
+  folds/
+    fold_0/
+      train.csv               # 5 images
+      val.csv                 # 1 image (e.g., dECM_1_1)
+      config.yaml             # Fold-specific train config
+      checkpoints/
+        best_model.pth
+        final_model.pth
+      tensorboard/
+    fold_1/
+      ...
+    fold_5/
+      ...
+  results/
+    fold_metrics.csv
+    summary.yaml
+```
+
+### Fold Metrics CSV Schema
+
+```csv
+fold,val_image,best_val_dice,best_val_iou,best_epoch,final_train_dice,training_time_min
+0,dECM_1_1,0.812,0.684,28,0.845,35.2
+1,dECM_1_2,0.778,0.637,32,0.831,38.1
+...
+```
+
+### Summary YAML Schema
+
+```yaml
+experiment_id: cv_001
+timestamp: 2025-12-27T10:30:00
+n_folds: 6
+strategy: leave_one_out
+
+aggregate_metrics:
+  val_dice:
+    mean: 0.795
+    std: 0.024
+    min: 0.762
+    max: 0.823
+    ci_95: [0.771, 0.819]  # 95% confidence interval
+  
+  val_iou:
+    mean: 0.661
+    std: 0.031
+    ...
+
+per_fold_summary:
+  best_fold: 3
+  worst_fold: 1
+  
+total_training_time_min: 215.4
+```
+
+### Reusing Existing Training Code
+
+The key insight: `train_model()` from Phase 3 already does everything we need. The CV orchestrator just:
+1. Generates different manifest CSVs per fold
+2. Calls `train_model()` with fold-specific config
+3. Collects the returned results
 
 ```python
-def compute_iou(mask1, mask2):
-    intersection = np.logical_and(mask1, mask2).sum()
-    union = np.logical_or(mask1, mask2).sum()
-    return intersection / union if union > 0 else 0.0
+# Pseudocode for orchestration loop
+for fold_idx, (train_csv, val_csv) in enumerate(fold_paths):
+    fold_config = create_fold_config(
+        base_config=cv_config["training"],
+        train_manifest=train_csv,
+        val_manifest=val_csv,
+        output_dir=cv_dir / "folds" / f"fold_{fold_idx}"
+    )
+    
+    # This is the existing function from Phase 3!
+    results = train_model(fold_config)
+    
+    fold_results.append(results)
 ```
-
-### Hungarian Matching
-
-```python
-from scipy.optimize import linear_sum_assignment
-
-# iou_matrix[i, j] = IoU between pred_object_i and gt_object_j
-# Convert to cost matrix (maximize IoU = minimize negative IoU)
-cost_matrix = -iou_matrix
-row_ind, col_ind = linear_sum_assignment(cost_matrix)
-
-# Filter matches below threshold
-matches = [(i, j) for i, j in zip(row_ind, col_ind) 
-           if iou_matrix[i, j] >= iou_threshold]
-```
-
-### Circularity Formula
-
-```
-circularity = 4 * π * area / perimeter²
-```
-
-- Perfect circle: circularity = 1.0
-- More irregular shapes: circularity < 1.0
 
 ---
 
 ## What NOT to Do This Session
 
-- Do not retrain or modify the model
-- Do not implement watershed splitting for touching objects (future work)
-- Do not implement tracking across time points (not applicable)
-- Do not over-engineer the visualization (basic matplotlib is fine)
-- Do not implement physical unit conversion if pixel size is unknown
+- Do not modify the core `train_model()` function (reuse as-is)
+- Do not implement ensemble inference (that's Phase 7)
+- Do not implement batch prediction (that's Phase 7)
+- Do not implement the review interface (that's Phase 8)
+- Do not optimize for parallel training across folds (sequential is fine)
 
 ---
 
@@ -200,116 +245,42 @@ circularity = 4 * π * area / perimeter²
 
 This session is complete when:
 
-1. `quantify_objects` command runs successfully on test set
-2. Per-object morphology CSVs generated for each test image
-3. Instance-level metrics computed (precision, recall, F1)
-4. Summary statistics and plots generated
-5. Detection F1 > 0.85 on test set (target, based on model performance)
+1. `run_cv --config configs/cv_config.yaml` executes all 6 folds
+2. Each fold produces a trained model in `runs/cv_001/folds/fold_N/`
+3. `fold_metrics.csv` contains per-fold performance
+4. `summary.yaml` contains aggregated statistics with mean ± std
+5. CV experiment completes without manual intervention
 6. Unit tests pass
-7. **POC pipeline complete end-to-end** 🎉
 
 ---
 
 ## Expected Results
 
-Based on val Dice 0.799 and assuming good pixel-level test performance:
-- **Detection precision:** 0.85-0.95 (few false positive objects)
-- **Detection recall:** 0.85-0.95 (few missed spheroids)
-- **Detection F1:** 0.85-0.95
-- **Mean matched IoU:** 0.70-0.85 (boundary accuracy)
+**Training time estimate:**
+- ~35-40 min per fold on M1
+- 6 folds × 40 min = ~4 hours total
+- Can run overnight or in background
 
-Spheroid morphology expectations (well-plate spheroids):
-- Circularity: 0.7-0.95 (mostly round, some irregular)
-- Size distribution: relatively uniform within each image
+**Expected performance:**
+- Mean val Dice: 0.75-0.85 (should be similar to POC, possibly better with more training data per fold)
+- Std val Dice: 0.02-0.05 (indicates consistency across images)
+- If one fold has much lower Dice, that image may have unusual characteristics
 
-**If detection F1 is low:**
-- Check min_object_area threshold (too high = missing small spheroids)
-- Check IoU threshold (0.5 is standard, but 0.3 may be more lenient)
-- Visually inspect FP and FN cases
+**What the results tell us:**
+- High mean, low std → model generalizes well, ready for production
+- High mean, high std → some images are harder, may need more data or investigation
+- Low mean → model or data issues to debug
 
 ---
 
 ## Notes / Decisions Log
 
-_Updated: 2025-12-26_
+_Update during session:_
 
-**Phase 5 Implementation Complete:**
-
-- Created `src/analysis/quantify.py` with comprehensive object analysis functions
-- Implemented all required features:
-  - Connected components extraction with area filtering
-  - Morphology metrics (13 properties per object)
-  - Hungarian matching algorithm for instance-level evaluation
-  - Instance metrics (precision, recall, F1, mean IoU)
-  - Summary visualization (4 plots)
-- Added `quantify_objects` CLI command to `src/cli.py`
-- Wrote 28 comprehensive unit tests - all passing
-- Added matplotlib dependency to pyproject.toml
-
-**Test Set Results:**
-- Images processed: 2
-- Total objects detected: 96 predicted, 54 ground truth
-- Instance-level metrics:
-  - True Positives: 51
-  - False Positives: 45
-  - False Negatives: 3
-  - **Precision: 0.538**
-  - **Recall: 0.948**
-  - **F1 Score: 0.682** (below 0.85 target)
-  - Mean Matched IoU: 0.770
-- Morphology statistics:
-  - Mean area: 2474.1 ± 1849.1 px²
-  - Mean diameter: 50.6 ± 24.3 px
-  - Mean circularity: 0.532 ± 0.172
-
-**Analysis:**
-- High recall (0.948) indicates model detects nearly all spheroids
-- Lower precision (0.538) indicates over-segmentation (45 FP vs 51 TP)
-- F1 < 0.85 target likely due to small test set (n=2) and model characteristics
-- Pixel-level Dice (0.794) doesn't directly translate to instance F1
-- Consider adjusting min_object_area threshold or post-processing for production
-
-**Code Quality:**
-- Addressed critical review findings:
-  - Added shape validation for mask pairs
-  - Added error handling for file I/O
-  - Fixed scikit-image deprecation warnings
-  - Clarified centroid coordinate comments
-- All tests pass with no warnings
-- Ready for production use with noted caveats
-
-
+- 
 
 ---
 
-## POC Completion Checklist
+## Next Session Preview
 
-After Phase 5, the full pipeline is complete:
-
-- [x] Phase 0: Project bootstrap
-- [x] Phase 1: Dataset validation and splits
-- [x] Phase 1.5: Sanity check (GO decision)
-- [x] Phase 3: Full model training (val Dice 0.799)
-- [x] Phase 4: Tiled inference on test set (test Dice 0.794)
-- [x] Phase 5: Object quantification and instance evaluation
-
-**Success criteria from SDD:**
-- [x] Validation Dice > 0.8 ✅ (achieved: 0.799)
-- [x] Detection F1 > 0.9 on well-separated spheroids ⚠️ (achieved: 0.682 - below target, but POC complete)
-- [x] Pipeline runs end-to-end without manual intervention ✅
-
-**🎉 POC PIPELINE COMPLETE 🎉**
-
-All phases implemented and functional. Detection F1 below target suggests model tuning or post-processing improvements needed for production, but core pipeline architecture is validated.
-
----
-
-## Next Steps (Post-POC)
-
-Once Phase 5 is complete, potential directions:
-
-1. **More data:** Annotate additional images to improve model robustness
-2. **Hyperparameter tuning:** With more data, implement cross-validation and tune
-3. **Harder cases:** Extend to touching spheroids, diffuse plating
-4. **New domains:** Adapt pipeline for 2D cultures, organoids
-5. **Deployment:** Package as standalone tool for lab use
+**Phase 7 (Batch Inference):** Apply trained model(s) to directory of unlabeled images. Support single model or ensemble of CV folds. Output predicted masks for entire image library.

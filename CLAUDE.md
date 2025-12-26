@@ -4,12 +4,32 @@ Operational guide for Claude Code working in this repository.
 
 ## Project Summary
 
-**SegOid** — PyTorch U-Net pipeline for spheroid segmentation in microscopy images. Trains on patches, infers on full images via tiling, outputs binary masks and morphology metrics.
+**SegOid** — PyTorch U-Net pipeline for spheroid segmentation in microscopy images.
 
-**Current Phase:** 5 (Object quantification and instance evaluation)  
-**Last Completed:** Phase 4 (Tiled inference — test Dice: 0.794)
+## Current Work
 
-For design rationale, phase details, and architectural decisions, see `docs/SDD.md`.
+**Active Phase:** 6 (Cross-validation infrastructure)
+
+**What to read:**
+- `AUTONOMOUS_SESSION.md` — If running autonomously, follow these instructions
+- `CURRENT_TASK.md` — Current phase tasks and completion criteria
+- `FLYWHEEL_MASTER_PLAN.md` — Roadmap for Phases 6-10
+
+## Completed Work (Do Not Reimplement)
+
+**POC (Phases 0-5) is complete and working.** The design is documented in `docs/SDD.md` for reference only. Do not modify core POC code unless fixing bugs.
+
+Implemented commands:
+```bash
+validate_dataset --input-dir data/working/ --output-dir data/splits/
+make_splits --manifest data/splits/all.csv --seed 42 --output-dir data/splits/
+sanity_check --patches-per-image 10 --epochs 5 --output-dir runs/sanity_check/
+train --config configs/train.yaml
+predict_full --checkpoint runs/<run_id>/checkpoints/best_model.pth --manifest data/splits/test.csv
+quantify_objects --pred-mask-dir inference/test_predictions/ --gt-manifest data/splits/test.csv
+```
+
+POC results: Val Dice 0.799, Test Dice 0.794
 
 ## Commands
 
@@ -22,14 +42,6 @@ pip install -e .
 pytest
 pytest --cov=src tests/
 
-# Pipeline commands
-validate_dataset --input-dir data/working/ --output-dir data/splits/
-make_splits --manifest data/splits/all.csv --seed 42 --output-dir data/splits/
-sanity_check --patches-per-image 10 --epochs 5 --output-dir runs/sanity_check/
-train --config configs/train.yaml
-predict_full --checkpoint runs/<run_id>/checkpoints/best_model.pth --manifest data/splits/test.csv --output-dir inference/test_predictions/
-quantify_objects --pred-mask-dir inference/test_predictions/ --gt-manifest data/splits/test.csv --output-dir metrics/
-
 # TensorBoard
 tensorboard --logdir runs/
 ```
@@ -39,52 +51,27 @@ tensorboard --logdir runs/
 ```
 segoid/
   data/
-    raw/                    # Original exports (never edit)
-    working/
-      images/               # 8-bit TIFFs for ML
-      masks/                # Binary masks (0/255)
-    splits/                 # CSV manifests
-  runs/                     # Training outputs
-  inference/                # Predictions
-  metrics/                  # Analysis outputs
-  src/                      # Package code
-    data/                   # validate.py, dataset.py
-    training/               # train.py
-    inference/              # predict.py
-    analysis/               # quantify.py
-  configs/                  # YAML configs
-  docs/                     # SDD.md
+    working/images/, masks/    # Training data
+    splits/                    # CSV manifests
+  runs/                        # Training outputs
+  inference/                   # Predictions  
+  metrics/                     # Analysis outputs
+  src/                         # Package code
+  configs/                     # YAML configs
+  docs/                        # SDD.md (POC design, reference only)
 ```
 
 ## Critical Conventions
 
-**File naming:** Image `X.tif` → Mask `X_mask.tif` (enforced pairing)
-
-**Image format:** Images are RGB (convert to grayscale during loading); masks are grayscale. TIFFs use LZW compression (requires `imagecodecs`).
-
-**Splits:** Always by image, never by patch (prevents data leakage)
-
-**Masks:** Binary 0/255, same dimensions as corresponding image
-
-**Patch size:** 256 pixels (measured: mean spheroid diameter ~58 px, ×2.5 → 145, rounded up)
-
-**Empty images:** `mask_coverage == 0` requires `empty_confirmed == True` or flagged for review
+- **File naming:** Image `X.tif` → Mask `X_mask.tif`
+- **Image format:** RGB images (convert to grayscale), grayscale masks, LZW compression
+- **Splits:** Always by image, never by patch
+- **Masks:** Binary 0/255
+- **Patch size:** 256 pixels
 
 ## Tech Stack
 
 Python 3.11+, PyTorch, segmentation-models-pytorch, albumentations, tifffile, imagecodecs, scikit-image, pandas, TensorBoard
-
-## Platform Notes
-
-- **Mac M1:** Dev/smoke tests only (CPU or MPS, 10-20× slower)
-- **Linux GPU:** Full training (RTX 5060 Ti, mixed precision)
-
-## Session Workflow
-
-1. Read `CURRENT_TASK.md` for session goals and scope
-2. Consult `docs/SDD.md` sections as referenced in task file
-3. Update task file completion checkboxes as you progress
-4. Note any decisions or issues in the task file's log section
 
 ## Code Style
 
@@ -92,4 +79,4 @@ Python 3.11+, PyTorch, segmentation-models-pytorch, albumentations, tifffile, im
 - Docstrings for modules and classes
 - Use `logging` module, not print statements
 - Config via YAML files in `configs/`
-- CLI via `click` or `argparse` (check existing patterns in `src/cli.py`)
+- Match existing patterns in `src/`
