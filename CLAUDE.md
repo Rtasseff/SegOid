@@ -6,8 +6,8 @@ Operational guide for Claude Code working in this repository.
 
 **SegOid** — PyTorch U-Net pipeline for spheroid segmentation in microscopy images. Trains on patches, infers on full images via tiling, outputs binary masks and morphology metrics.
 
-**Current Phase:** 3 (Full model training)  
-**Last Completed:** Phase 1.5/2 (Sanity check — GO decision confirmed)
+**Current Phase:** 5 (Object quantification and instance evaluation)  
+**Last Completed:** Phase 4 (Tiled inference — test Dice: 0.794)
 
 For design rationale, phase details, and architectural decisions, see `docs/SDD.md`.
 
@@ -27,7 +27,11 @@ validate_dataset --input-dir data/working/ --output-dir data/splits/
 make_splits --manifest data/splits/all.csv --seed 42 --output-dir data/splits/
 sanity_check --patches-per-image 10 --epochs 5 --output-dir runs/sanity_check/
 train --config configs/train.yaml
-# predict_full, quantify_objects — not yet implemented
+predict_full --checkpoint runs/<run_id>/checkpoints/best_model.pth --manifest data/splits/test.csv --output-dir inference/test_predictions/
+quantify_objects --pred-mask-dir inference/test_predictions/ --gt-manifest data/splits/test.csv --output-dir metrics/
+
+# TensorBoard
+tensorboard --logdir runs/
 ```
 
 ## Directory Structure

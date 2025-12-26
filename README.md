@@ -18,14 +18,21 @@ pytest
 
 ## Project Status
 
-**Current Phase:** Phase 3 (Full Model Training) - ✅ Complete
+**🎉 PROOF-OF-CONCEPT COMPLETE 🎉**
+
+All pipeline phases implemented and functional end-to-end.
 
 **Completed Phases:**
 - ✅ Phase 1: Dataset validation and train/val/test splits
 - ✅ Phase 1.5: Sanity check (pipeline validation)
-- ✅ Phase 3: Production training infrastructure
+- ✅ Phase 3: Production training infrastructure (val Dice: 0.799)
+- ✅ Phase 4: Tiled inference on full-resolution images (test Dice: 0.794)
+- ✅ Phase 5: Object quantification and instance evaluation (F1: 0.682)
 
-**Next:** Phase 4 (Tiled inference on full-resolution images)
+**Results:**
+- Pixel-level segmentation: **79.4% Dice** on test set
+- Instance detection: **68.2% F1** (high recall 94.8%, lower precision 53.8%)
+- Pipeline runs fully automated from raw images to quantified objects
 
 ## Documentation
 
@@ -142,22 +149,138 @@ train --config configs/train.yaml \
 - Target validation Dice: 0.75-0.90
 - Early stopping typically triggers around epoch 25-35
 
-### Phase 4: Tiled Inference (Not Yet Implemented)
+### Phase 4: Tiled Inference
 
-Apply trained model to full-resolution images:
-
-```bash
-predict_full --config configs/predict.yaml \
-             --checkpoint runs/train_<timestamp>/checkpoints/best_model.pth
-```
-
-### Phase 5: Object Quantification (Not Yet Implemented)
-
-Extract individual spheroids and compute morphology metrics:
+Apply trained model to full-resolution images using sliding window approach:
 
 ```bash
-quantify_objects --config configs/quantify.yaml
+predict_full --checkpoint runs/train_<timestamp>/checkpoints/best_model.pth \
+             --manifest data/splits/test.csv \
+             --output-dir inference/test_predictions/
 ```
+
+**Parameters:**
+- `--checkpoint` (required): Path to trained model checkpoint
+- `--manifest` (required): CSV manifest with image/mask paths
+- `--output-dir`: Output directory for predictions (default: `inference/`)
+- `--tile-size`: Tile size for sliding window (default: 256)
+- `--overlap`: Overlap fraction between tiles (default: 0.25)
+- `--threshold`: Probability threshold for binarization (default: 0.5)
+- `--min-object-area`: Minimum object area for post-processing (default: 100 px)
+- `--data-root`: Root directory for relative paths (default: `data/`)
+
+**Outputs:**
+```
+inference/test_predictions/
+├── <image>_pred_mask.tif   # Binary mask (0/255)
+├── <image>_pred_prob.tif   # Probability map (float32)
+└── pixel_metrics.csv       # Per-image Dice/IoU scores
+```
+
+**Features:**
+- Sliding window with configurable overlap for smooth predictions
+- Post-processing: small object removal, hole filling
+- Pixel-level evaluation when ground truth available
+
+### Phase 5: Object Quantification
+
+Extract individual spheroids, match to ground truth, and compute morphology metrics:
+
+```bash
+quantify_objects --pred-mask-dir inference/test_predictions/ \
+                 --gt-manifest data/splits/test.csv \
+                 --output-dir metrics/
+```
+
+**Parameters:**
+- `--pred-mask-dir` (required): Directory with predicted masks
+- `--gt-manifest` (required): Path to ground truth manifest CSV
+- `--output-dir`: Output directory (default: `metrics/`)
+- `--min-object-area`: Minimum object area in pixels (default: 100)
+- `--iou-threshold`: IoU threshold for valid match (default: 0.5)
+- `--pixel-size`: Pixel size in µm for physical units (optional)
+- `--data-root`: Root directory for relative paths (default: `data/`)
+
+**Outputs:**
+```
+metrics/
+├── all_objects.csv           # All detected objects with morphology
+├── instance_eval.csv         # Per-image instance metrics (TP/FP/FN)
+├── summary.csv               # Dataset-level summary statistics
+├── per_image/
+│   └── <image>_objects.csv   # Per-object morphology for each image
+└── plots/
+    └── summary_plots.png     # Visualization (4 plots)
+```
+
+**Morphology Metrics (per object):**
+- `object_id`: Unique identifier
+- `area`: Pixel count (or µm² if pixel_size provided)
+- `perimeter`: Boundary length
+- `equivalent_diameter`: Diameter of equal-area circle
+- `major_axis_length`, `minor_axis_length`: Fitted ellipse axes
+- `eccentricity`: 0=circle, 1=line
+- `circularity`: 4πA/P² (1=perfect circle)
+- `centroid_x`, `centroid_y`: Object center
+- `bbox_*`: Bounding box coordinates
+
+**Instance Metrics:**
+- True Positives (TP), False Positives (FP), False Negatives (FN)
+- Precision, Recall, F1 Score
+- Mean Matched IoU
+
+**Visualizations:**
+- Histogram of spheroid areas
+- Histogram of equivalent diameters
+- Histogram of circularity
+- Scatter plot: predicted vs ground truth object count
+
+## Complete End-to-End Example
+
+Here's a complete workflow from raw data to quantified objects:
+
+```bash
+# 1. Set up environment
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+
+# 2. Validate dataset and create splits
+validate_dataset --input-dir data/working/ --output-dir data/splits/
+make_splits --manifest data/splits/all.csv --seed 42 --output-dir data/splits/
+
+# 3. Run sanity check (optional but recommended)
+sanity_check --config configs/sanity_check.yaml
+
+# 4. Train full model
+train --config configs/train.yaml
+
+# 5. Monitor training (in separate terminal)
+tensorboard --logdir runs/
+
+# 6. Run inference on test set
+predict_full --checkpoint runs/train_YYYYMMDD_HHMMSS/checkpoints/best_model.pth \
+             --manifest data/splits/test.csv \
+             --output-dir inference/test_predictions/
+
+# 7. Quantify objects and generate metrics
+quantify_objects --pred-mask-dir inference/test_predictions/ \
+                 --gt-manifest data/splits/test.csv \
+                 --output-dir metrics/
+
+# 8. Review results
+cat metrics/summary.csv
+open metrics/plots/summary_plots.png  # macOS
+```
+
+**Expected timing (M1 Mac):**
+- Phase 1 (validation + splits): < 1 minute
+- Phase 1.5 (sanity check): 5-10 minutes
+- Phase 3 (full training): 30-40 minutes
+- Phase 4 (inference): < 1 minute
+- Phase 5 (quantification): < 1 minute
+
+**Total:** ~45 minutes from data to results
 
 ## Configuration Files
 
@@ -184,7 +307,7 @@ pytest --cov=src tests/
 pytest tests/test_training.py -v
 ```
 
-Current test coverage: 45 tests across dataset, training, and validation.
+Current test coverage: 73 tests across all modules (dataset, training, inference, quantification).
 
 ## Directory Structure
 
@@ -216,7 +339,9 @@ segoid/
 - **albumentations** - Data augmentation
 - **TensorBoard** - Training visualization
 - **tifffile** + **imagecodecs** - TIFF I/O with LZW compression
-- **scikit-image** - Image processing
+- **scikit-image** - Image processing and morphology analysis
+- **scipy** - Hungarian algorithm for instance matching
+- **matplotlib** - Visualization and plotting
 - **pandas** - Data management
 - **pytest** - Testing
 

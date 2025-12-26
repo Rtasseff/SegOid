@@ -501,27 +501,391 @@ def train():
 def predict_full():
     """Phase 4: Run tiled inference on full-resolution images."""
     parser = argparse.ArgumentParser(
-        description="Run tiled inference on full images"
+        description="Run tiled inference on full images to generate predicted masks"
     )
-    parser.add_argument("--config", required=True, help="Path to predict.yaml")
-    parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint")
-    parser.add_argument("--output-dir", help="Override output directory")
+    parser.add_argument(
+        "--checkpoint",
+        required=True,
+        help="Path to model checkpoint (.pth file)",
+    )
+    parser.add_argument(
+        "--manifest",
+        required=True,
+        help="Path to CSV manifest (e.g., data/splits/test.csv)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="inference/",
+        help="Output directory for predictions (default: inference/)",
+    )
+    parser.add_argument(
+        "--tile-size",
+        type=int,
+        default=256,
+        help="Tile size for sliding window (default: 256)",
+    )
+    parser.add_argument(
+        "--overlap",
+        type=float,
+        default=0.25,
+        help="Overlap fraction between tiles (default: 0.25)",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="Probability threshold for binarization (default: 0.5)",
+    )
+    parser.add_argument(
+        "--min-object-area",
+        type=int,
+        default=100,
+        help="Minimum object area in pixels (default: 100)",
+    )
+    parser.add_argument(
+        "--data-root",
+        default="data/",
+        help="Root directory for image/mask paths (default: data/)",
+    )
     args = parser.parse_args()
 
-    print(f"[Phase 4] Running inference with config: {args.config}")
-    print(f"Using checkpoint: {args.checkpoint}")
-    print("⚠️  Not yet implemented - Phase 4 placeholder")
-    return 0
+    try:
+        import pandas as pd
+        import torch
+
+        from src.inference.predict import (
+            load_model_from_checkpoint,
+            predict_image_from_path,
+        )
+
+        print("\n" + "=" * 80)
+        print("PHASE 4: TILED INFERENCE ON FULL IMAGES")
+        print("=" * 80)
+
+        # Parse arguments
+        checkpoint_path = Path(args.checkpoint)
+        manifest_path = Path(args.manifest)
+        output_dir = Path(args.output_dir)
+        data_root = Path(args.data_root)
+
+        print(f"\nConfiguration:")
+        print(f"  Checkpoint: {checkpoint_path}")
+        print(f"  Manifest: {manifest_path}")
+        print(f"  Output directory: {output_dir}")
+        print(f"  Tile size: {args.tile_size}")
+        print(f"  Overlap: {args.overlap}")
+        print(f"  Threshold: {args.threshold}")
+        print(f"  Min object area: {args.min_object_area} px")
+
+        # Verify checkpoint exists
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+        # Verify manifest exists
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"Manifest not found: {manifest_path}")
+
+        # Detect device
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            print(f"\n✓ Using GPU: {torch.cuda.get_device_name(0)}")
+        elif torch.backends.mps.is_available():
+            device = torch.device("mps")
+            print("\n✓ Using Apple M1/M2 GPU (MPS)")
+        else:
+            device = torch.device("cpu")
+            print("\n⚠️  Using CPU (inference will be slower)")
+
+        # Load model
+        print("\nLoading model...")
+        model = load_model_from_checkpoint(checkpoint_path, device)
+
+        # Load manifest
+        print("\nLoading manifest...")
+        manifest_df = pd.read_csv(manifest_path)
+        print(f"  Found {len(manifest_df)} images")
+
+        # Process each image
+        print("\nRunning inference...")
+        all_metrics = []
+
+        for idx, row in manifest_df.iterrows():
+            # Resolve paths relative to data_root
+            image_path = data_root / row["image_path"]
+            mask_path = data_root / row["mask_path"] if "mask_path" in row else None
+
+            # Run inference on this image
+            metrics = predict_image_from_path(
+                image_path=image_path,
+                mask_path=mask_path,
+                model=model,
+                device=device,
+                output_dir=output_dir,
+                tile_size=args.tile_size,
+                overlap=args.overlap,
+                threshold=args.threshold,
+                min_object_area=args.min_object_area,
+            )
+
+            if metrics:  # If ground truth was available
+                all_metrics.append(metrics)
+
+        # Save metrics to CSV
+        if all_metrics:
+            metrics_df = pd.DataFrame(all_metrics)
+            metrics_path = output_dir / "pixel_metrics.csv"
+            metrics_df.to_csv(metrics_path, index=False)
+
+            print("\n" + "=" * 80)
+            print("INFERENCE COMPLETE")
+            print("=" * 80)
+            print("\nPixel-level Metrics Summary:")
+            print(f"  Mean Dice: {metrics_df['dice'].mean():.4f} ± {metrics_df['dice'].std():.4f}")
+            print(f"  Mean IoU:  {metrics_df['iou'].mean():.4f} ± {metrics_df['iou'].std():.4f}")
+            print(f"\nPer-image metrics:")
+            for _, row in metrics_df.iterrows():
+                print(f"  {row['image']}: Dice={row['dice']:.4f}, IoU={row['iou']:.4f}")
+
+            print(f"\n✓ Metrics saved to: {metrics_path}")
+        else:
+            print("\n" + "=" * 80)
+            print("INFERENCE COMPLETE")
+            print("=" * 80)
+            print("\n⚠️  No ground truth masks available - metrics not computed")
+
+        print(f"\n✓ Predictions saved to: {output_dir}")
+        print(f"  - Probability maps: *_pred_prob.tif")
+        print(f"  - Binary masks: *_pred_mask.tif")
+
+        print("\n" + "=" * 80 + "\n")
+
+        return 0
+
+    except Exception as e:
+        logging.error(f"Inference failed: {e}", exc_info=True)
+        return 1
 
 
 def quantify_objects():
     """Phase 5: Extract objects and compute morphology metrics."""
     parser = argparse.ArgumentParser(
-        description="Quantify objects: extract instances and compute metrics"
+        description="Extract individual objects from segmentation masks, match to ground truth, and compute morphology metrics"
     )
-    parser.add_argument("--config", required=True, help="Path to quantify.yaml")
+    parser.add_argument(
+        "--pred-mask-dir",
+        required=True,
+        help="Directory with predicted masks (e.g., inference/test_predictions/)",
+    )
+    parser.add_argument(
+        "--gt-manifest",
+        required=True,
+        help="Path to test manifest CSV (e.g., data/splits/test.csv)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="metrics/",
+        help="Output directory for metrics and plots (default: metrics/)",
+    )
+    parser.add_argument(
+        "--min-object-area",
+        type=int,
+        default=100,
+        help="Minimum object area in pixels (default: 100)",
+    )
+    parser.add_argument(
+        "--iou-threshold",
+        type=float,
+        default=0.5,
+        help="IoU threshold for valid object match (default: 0.5)",
+    )
+    parser.add_argument(
+        "--pixel-size",
+        type=float,
+        help="Pixel size in micrometers for physical unit conversion (optional)",
+    )
+    parser.add_argument(
+        "--data-root",
+        default="data/",
+        help="Root directory for relative paths in manifest (default: data/)",
+    )
     args = parser.parse_args()
 
-    print(f"[Phase 5] Quantifying objects with config: {args.config}")
-    print("⚠️  Not yet implemented - Phase 5 placeholder")
-    return 0
+    try:
+        import pandas as pd
+        from src.analysis.quantify import (
+            process_image_pair,
+            create_summary_plots,
+        )
+
+        print("\n" + "=" * 80)
+        print("PHASE 5: OBJECT QUANTIFICATION AND INSTANCE EVALUATION")
+        print("=" * 80)
+
+        # Parse arguments
+        pred_mask_dir = Path(args.pred_mask_dir)
+        gt_manifest_path = Path(args.gt_manifest)
+        output_dir = Path(args.output_dir)
+        data_root = Path(args.data_root)
+
+        print(f"\nConfiguration:")
+        print(f"  Predicted masks: {pred_mask_dir}")
+        print(f"  GT manifest: {gt_manifest_path}")
+        print(f"  Output directory: {output_dir}")
+        print(f"  Min object area: {args.min_object_area} px")
+        print(f"  IoU threshold: {args.iou_threshold}")
+        if args.pixel_size:
+            print(f"  Pixel size: {args.pixel_size} µm")
+
+        # Verify inputs
+        if not pred_mask_dir.exists():
+            raise FileNotFoundError(f"Predicted mask directory not found: {pred_mask_dir}")
+        if not gt_manifest_path.exists():
+            raise FileNotFoundError(f"Ground truth manifest not found: {gt_manifest_path}")
+
+        # Create output directories
+        output_dir.mkdir(parents=True, exist_ok=True)
+        per_image_dir = output_dir / "per_image"
+        per_image_dir.mkdir(parents=True, exist_ok=True)
+        plots_dir = output_dir / "plots"
+        plots_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load ground truth manifest
+        print("\nLoading ground truth manifest...")
+        gt_manifest = pd.read_csv(gt_manifest_path)
+        print(f"  Found {len(gt_manifest)} images")
+
+        # Process each image
+        print("\nProcessing images...")
+        all_objects = []
+        instance_metrics_list = []
+
+        for idx, row in gt_manifest.iterrows():
+            basename = Path(row["image_path"]).stem
+
+            # Find predicted mask
+            pred_mask_path = pred_mask_dir / f"{basename}_pred_mask.tif"
+            if not pred_mask_path.exists():
+                logging.warning(f"Predicted mask not found for {basename}, skipping")
+                continue
+
+            # Ground truth mask path
+            gt_mask_path = data_root / row["mask_path"]
+            if not gt_mask_path.exists():
+                logging.warning(f"Ground truth mask not found: {gt_mask_path}, skipping")
+                continue
+
+            print(f"  [{idx + 1}/{len(gt_manifest)}] Processing {basename}...")
+
+            # Process this image pair
+            obj_props, inst_metrics, _, _ = process_image_pair(
+                pred_mask_path=pred_mask_path,
+                gt_mask_path=gt_mask_path,
+                min_object_area=args.min_object_area,
+                iou_threshold=args.iou_threshold,
+                pixel_size=args.pixel_size,
+            )
+
+            # Save per-image object properties
+            if len(obj_props) > 0:
+                obj_props["image"] = basename
+                per_image_csv = per_image_dir / f"{basename}_objects.csv"
+                obj_props.to_csv(per_image_csv, index=False)
+                all_objects.append(obj_props)
+
+            # Record instance metrics
+            inst_metrics["image"] = basename
+            instance_metrics_list.append(inst_metrics)
+
+            # Print per-image summary
+            print(f"      Objects: {inst_metrics['n_pred']} predicted, {inst_metrics['n_gt']} ground truth")
+            print(f"      TP={inst_metrics['tp']}, FP={inst_metrics['fp']}, FN={inst_metrics['fn']}")
+            print(f"      Precision={inst_metrics['precision']:.3f}, Recall={inst_metrics['recall']:.3f}, F1={inst_metrics['f1']:.3f}")
+
+        # Combine all results
+        print("\nGenerating summary statistics...")
+
+        # All objects CSV
+        if all_objects:
+            all_objects_df = pd.concat(all_objects, ignore_index=True)
+            all_objects_path = output_dir / "all_objects.csv"
+            all_objects_df.to_csv(all_objects_path, index=False)
+            print(f"  ✓ Saved {len(all_objects_df)} object records to {all_objects_path}")
+        else:
+            all_objects_df = pd.DataFrame()
+            logging.warning("No objects found in any image")
+
+        # Instance evaluation CSV
+        instance_eval_df = pd.DataFrame(instance_metrics_list)
+        instance_eval_path = output_dir / "instance_eval.csv"
+        instance_eval_df.to_csv(instance_eval_path, index=False)
+        print(f"  ✓ Saved per-image instance metrics to {instance_eval_path}")
+
+        # Summary statistics
+        summary = {
+            "total_images": len(instance_eval_df),
+            "total_pred_objects": instance_eval_df["n_pred"].sum(),
+            "total_gt_objects": instance_eval_df["n_gt"].sum(),
+            "total_tp": instance_eval_df["tp"].sum(),
+            "total_fp": instance_eval_df["fp"].sum(),
+            "total_fn": instance_eval_df["fn"].sum(),
+            "mean_precision": instance_eval_df["precision"].mean(),
+            "mean_recall": instance_eval_df["recall"].mean(),
+            "mean_f1": instance_eval_df["f1"].mean(),
+            "mean_matched_iou": instance_eval_df["mean_matched_iou"].mean(),
+        }
+
+        summary_df = pd.DataFrame([summary])
+        summary_path = output_dir / "summary.csv"
+        summary_df.to_csv(summary_path, index=False)
+        print(f"  ✓ Saved dataset summary to {summary_path}")
+
+        # Create plots
+        if len(all_objects_df) > 0:
+            print("\nGenerating summary plots...")
+            create_summary_plots(all_objects_df, instance_eval_df, plots_dir)
+            print(f"  ✓ Saved plots to {plots_dir}")
+
+        # Print final summary
+        print("\n" + "=" * 80)
+        print("OBJECT QUANTIFICATION COMPLETE")
+        print("=" * 80)
+        print("\nDataset-Level Summary:")
+        print(f"  Images processed: {summary['total_images']}")
+        print(f"  Total predicted objects: {summary['total_pred_objects']}")
+        print(f"  Total ground truth objects: {summary['total_gt_objects']}")
+        print(f"\nInstance-Level Metrics:")
+        print(f"  True Positives (TP): {summary['total_tp']}")
+        print(f"  False Positives (FP): {summary['total_fp']}")
+        print(f"  False Negatives (FN): {summary['total_fn']}")
+        print(f"  Mean Precision: {summary['mean_precision']:.4f}")
+        print(f"  Mean Recall: {summary['mean_recall']:.4f}")
+        print(f"  Mean F1 Score: {summary['mean_f1']:.4f}")
+        print(f"  Mean Matched IoU: {summary['mean_matched_iou']:.4f}")
+
+        if len(all_objects_df) > 0:
+            print(f"\nMorphology Statistics:")
+            print(f"  Area: {all_objects_df['area'].mean():.1f} ± {all_objects_df['area'].std():.1f}")
+            print(f"  Equivalent Diameter: {all_objects_df['equivalent_diameter'].mean():.1f} ± {all_objects_df['equivalent_diameter'].std():.1f}")
+            print(f"  Circularity: {all_objects_df['circularity'].mean():.3f} ± {all_objects_df['circularity'].std():.3f}")
+
+        print(f"\nOutputs saved to: {output_dir}")
+        print(f"  - All objects: {output_dir / 'all_objects.csv'}")
+        print(f"  - Instance metrics: {output_dir / 'instance_eval.csv'}")
+        print(f"  - Summary: {output_dir / 'summary.csv'}")
+        print(f"  - Per-image objects: {per_image_dir}")
+        print(f"  - Plots: {plots_dir}")
+
+        # Check success criteria
+        print("\n" + "=" * 80)
+        if summary['mean_f1'] >= 0.85:
+            print("✅ SUCCESS: Detection F1 ≥ 0.85 - POC pipeline complete!")
+        else:
+            print(f"⚠️  Detection F1 = {summary['mean_f1']:.3f} < 0.85")
+            print("   Consider adjusting min_object_area or iou_threshold")
+        print("=" * 80 + "\n")
+
+        return 0
+
+    except Exception as e:
+        logging.error(f"Object quantification failed: {e}", exc_info=True)
+        return 1
