@@ -233,3 +233,181 @@ def test_generate_kfold_splits_raises_error_if_too_many_folds(
 
     with pytest.raises(ValueError, match="cannot exceed number of images"):
         generate_kfold_splits(sample_manifest, output_dir, n_folds=10, seed=42)
+
+
+# Tests for CV orchestration
+
+
+@pytest.fixture
+def sample_cv_config(tmp_path, sample_manifest):
+    """Create a sample CV config YAML."""
+    config_path = tmp_path / "cv_config.yaml"
+
+    config = {
+        "cv": {
+            "strategy": "leave_one_out",
+            "source_manifest": str(sample_manifest),
+            "seed": 42,
+        },
+        "dataset": {
+            "patch_size": 256,
+            "patches_per_image": 2,
+            "positive_ratio": 0.7,
+            "negative_threshold": 0.05,
+            "max_jitter": 0.25,
+            "augmentation": {
+                "enabled": False,
+            },
+        },
+        "model": {
+            "architecture": "unet",
+            "encoder": "resnet18",
+            "encoder_weights": "imagenet",
+            "in_channels": 1,
+            "classes": 1,
+        },
+        "training": {
+            "epochs": 2,
+            "batch_size": 2,
+            "learning_rate": 0.0001,
+            "num_workers": 0,
+            "pin_memory": False,
+        },
+        "loss": {"bce_weight": 0.5, "dice_weight": 0.5},
+        "early_stopping": {"enabled": False},
+        "lr_scheduler": {"enabled": False},
+        "checkpointing": {"save_best": True, "save_final": True},
+        "tensorboard": {"enabled": False},
+        "output": {"cv_dir": "cv_test"},
+        "validation": {"prediction_threshold": 0.5},
+    }
+
+    with open(config_path, "w") as f:
+        yaml.dump(config, f)
+
+    return config_path
+
+
+def test_load_cv_config_valid(sample_cv_config):
+    """Test loading a valid CV config."""
+    from src.training.cross_validation import load_cv_config
+
+    config = load_cv_config(sample_cv_config)
+
+    assert "cv" in config
+    assert "dataset" in config
+    assert "model" in config
+    assert config["cv"]["strategy"] == "leave_one_out"
+
+
+def test_load_cv_config_missing_required_field(tmp_path):
+    """Test that loading config with missing field raises error."""
+    from src.training.cross_validation import load_cv_config
+
+    config_path = tmp_path / "bad_config.yaml"
+    config = {"cv": {"strategy": "leave_one_out"}}  # Missing other required fields
+
+    with open(config_path, "w") as f:
+        yaml.dump(config, f)
+
+    with pytest.raises(ValueError, match="Missing required config field"):
+        load_cv_config(config_path)
+
+
+def test_load_cv_config_invalid_strategy(tmp_path, sample_manifest):
+    """Test that invalid CV strategy raises error."""
+    from src.training.cross_validation import load_cv_config
+
+    config_path = tmp_path / "bad_config.yaml"
+    config = {
+        "cv": {"strategy": "invalid_strategy", "source_manifest": str(sample_manifest)},
+        "dataset": {},
+        "model": {},
+        "training": {},
+        "output": {},
+    }
+
+    with open(config_path, "w") as f:
+        yaml.dump(config, f)
+
+    with pytest.raises(ValueError, match="Unknown CV strategy"):
+        load_cv_config(config_path)
+
+
+def test_create_fold_config(tmp_path, sample_cv_config):
+    """Test creation of fold-specific config."""
+    from src.training.cross_validation import create_fold_config, load_cv_config
+
+    cv_config = load_cv_config(sample_cv_config)
+
+    train_manifest = tmp_path / "train.csv"
+    val_manifest = tmp_path / "val.csv"
+    output_dir = tmp_path / "fold_0"
+
+    # Create dummy manifests
+    pd.DataFrame({"basename": ["img_0"]}).to_csv(train_manifest, index=False)
+    pd.DataFrame({"basename": ["img_1"]}).to_csv(val_manifest, index=False)
+
+    fold_config = create_fold_config(
+        cv_config, train_manifest, val_manifest, output_dir
+    )
+
+    # Check structure
+    assert "model" in fold_config
+    assert "data" in fold_config
+    assert "dataset" in fold_config
+    assert "training" in fold_config
+    assert "output" in fold_config
+
+    # Check fold-specific values
+    assert fold_config["data"]["train_manifest"] == str(train_manifest)
+    assert fold_config["data"]["val_manifest"] == str(val_manifest)
+    assert fold_config["output"]["run_dir"] == str(output_dir)
+
+
+def test_aggregate_results():
+    """Test aggregation of fold results."""
+    from src.training.cross_validation import aggregate_results
+
+    fold_results = [
+        {
+            "fold": 0,
+            "val_image": "img_0",
+            "best_val_dice": 0.80,
+            "best_epoch": 10,
+            "final_train_dice": 0.85,
+            "training_time_min": 30.0,
+        },
+        {
+            "fold": 1,
+            "val_image": "img_1",
+            "best_val_dice": 0.75,
+            "best_epoch": 8,
+            "final_train_dice": 0.82,
+            "training_time_min": 28.0,
+        },
+        {
+            "fold": 2,
+            "val_image": "img_2",
+            "best_val_dice": 0.85,
+            "best_epoch": 12,
+            "final_train_dice": 0.88,
+            "training_time_min": 32.0,
+        },
+    ]
+
+    summary = aggregate_results(fold_results)
+
+    # Check structure
+    assert "n_folds" in summary
+    assert "val_dice" in summary
+    assert "best_fold" in summary
+    assert "worst_fold" in summary
+
+    # Check values
+    assert summary["n_folds"] == 3
+    assert summary["val_dice"]["mean"] == pytest.approx(0.80, abs=0.01)
+    assert summary["val_dice"]["min"] == 0.75
+    assert summary["val_dice"]["max"] == 0.85
+    assert summary["best_fold"] == 2  # Highest dice
+    assert summary["worst_fold"] == 1  # Lowest dice
