@@ -6,8 +6,8 @@ Operational guide for Claude Code working in this repository.
 
 **SegOid** — PyTorch U-Net pipeline for spheroid segmentation in microscopy images. Trains on patches, infers on full images via tiling, outputs binary masks and morphology metrics.
 
-**Current Phase:** 1 (Image curation and dataset splits)  
-**Last Completed:** Phase 0 (Project bootstrap)
+**Current Phase:** 1.5 (Sanity check)  
+**Last Completed:** Phase 1 (Validation and splits — 6 images: 3 train, 1 val, 2 test)
 
 For design rationale, phase details, and architectural decisions, see `docs/SDD.md`.
 
@@ -55,17 +55,19 @@ segoid/
 
 **File naming:** Image `X.tif` → Mask `X_mask.tif` (enforced pairing)
 
+**Image format:** Images are RGB (convert to grayscale during loading); masks are grayscale. TIFFs use LZW compression (requires `imagecodecs`).
+
 **Splits:** Always by image, never by patch (prevents data leakage)
 
 **Masks:** Binary 0/255, same dimensions as corresponding image
 
-**Patch size:** 2.5× spheroid diameter, rounded to power of 2
+**Patch size:** 256 pixels (measured: mean spheroid diameter ~58 px, ×2.5 → 145, rounded up)
 
 **Empty images:** `mask_coverage == 0` requires `empty_confirmed == True` or flagged for review
 
 ## Tech Stack
 
-Python 3.11+, PyTorch, segmentation-models-pytorch, albumentations, tifffile, scikit-image, pandas, TensorBoard
+Python 3.11+, PyTorch, segmentation-models-pytorch, albumentations, tifffile, imagecodecs, scikit-image, pandas, TensorBoard
 
 ## Platform Notes
 

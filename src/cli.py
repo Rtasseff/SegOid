@@ -5,7 +5,20 @@ These are placeholder implementations that will be fleshed out in later phases.
 """
 
 import argparse
+import logging
 import sys
+from pathlib import Path
+
+from src.data.validate import (
+    validate_dataset as run_validation,
+    print_validation_summary,
+)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 
 
 def validate_dataset():
@@ -17,10 +30,25 @@ def validate_dataset():
     parser.add_argument("--output-dir", required=True, help="Path to data/splits/ directory")
     args = parser.parse_args()
 
-    print(f"[Phase 1] Validating dataset in {args.input_dir}")
-    print(f"Output will be written to {args.output_dir}")
-    print("⚠️  Not yet implemented - Phase 1 placeholder")
-    return 0
+    try:
+        input_dir = Path(args.input_dir)
+        output_dir = Path(args.output_dir)
+
+        # Run validation
+        all_df, qc_df, result = run_validation(input_dir, output_dir)
+
+        # Print summary
+        print_validation_summary(all_df, qc_df, result)
+
+        # Return error code if validation failed
+        if result.failed > 0:
+            return 1
+
+        return 0
+
+    except Exception as e:
+        logging.error(f"Validation failed: {e}", exc_info=True)
+        return 1
 
 
 def make_splits():
@@ -31,16 +59,38 @@ def make_splits():
     parser.add_argument("--manifest", required=True, help="Path to all.csv manifest")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--output-dir", required=True, help="Path to data/splits/ directory")
-    parser.add_argument("--train-ratio", type=float, default=0.7, help="Training set ratio")
-    parser.add_argument("--val-ratio", type=float, default=0.15, help="Validation set ratio")
-    parser.add_argument("--test-ratio", type=float, default=0.15, help="Test set ratio")
+    parser.add_argument("--train-ratio", type=float, default=0.6, help="Training set ratio")
+    parser.add_argument("--val-ratio", type=float, default=0.2, help="Validation set ratio")
+    parser.add_argument("--test-ratio", type=float, default=0.2, help="Test set ratio")
+    parser.add_argument(
+        "--stratify",
+        action="store_true",
+        help="Stratify splits by mask coverage buckets",
+    )
     args = parser.parse_args()
 
-    print(f"[Phase 1] Creating splits from {args.manifest}")
-    print(f"Split ratios: train={args.train_ratio}, val={args.val_ratio}, test={args.test_ratio}")
-    print(f"Random seed: {args.seed}")
-    print("⚠️  Not yet implemented - Phase 1 placeholder")
-    return 0
+    try:
+        from src.data.validate import make_splits as run_splits
+
+        manifest_path = Path(args.manifest)
+        output_dir = Path(args.output_dir)
+
+        # Run split generation
+        run_splits(
+            manifest_path,
+            output_dir,
+            seed=args.seed,
+            train_ratio=args.train_ratio,
+            val_ratio=args.val_ratio,
+            test_ratio=args.test_ratio,
+            stratify=args.stratify,
+        )
+
+        return 0
+
+    except Exception as e:
+        logging.error(f"Split generation failed: {e}", exc_info=True)
+        return 1
 
 
 def sanity_check():

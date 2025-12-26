@@ -1,8 +1,8 @@
 # Current Task
 
 **Project:** SegOid (Spheroid Segmentation Pipeline)  
-**Date:** 2025-01-15  
-**Session:** Phase 1 — Image Curation and Dataset Splits
+**Date:** 2025-12-26  
+**Session:** Phase 1.5 — Sanity Check
 
 ---
 
@@ -10,73 +10,93 @@
 
 | Item | Value |
 |------|-------|
-| **Active Phase** | 1 |
-| **Last Completed** | Phase 0 — Package structure, CLI placeholders |
+| **Active Phase** | 1.5 |
+| **Last Completed** | Phase 1 — Validation and splits (6 images: 3 train, 2 val, 1 test) |
 | **Blocking Issues** | None |
+
+---
+
+## Context from Phase 1
+
+- Images are RGB (converted to grayscale during loading); masks are grayscale
+- LZW-compressed TIFFs require `imagecodecs` (already added to dependencies)
+- Recommended patch size: **256 pixels** (based on mean spheroid diameter ~58 px)
+- Small dataset: only 3 training images, 2 validation image
 
 ---
 
 ## Session Goal
 
-Implement dataset validation and split generation: verify image/mask pairing, compute QC metrics, handle empty images, and produce train/val/test manifests.
+Implement minimal training infrastructure and run a quick sanity check (5 epochs, reduced data) to validate the full pipeline—data loading, model forward pass, loss computation, mask alignment—before committing to full training.
 
 ---
 
 ## Tasks
 
-### 1. Implement `validate_dataset` command
+### 1. Implement `PatchDataset`
 
-- [ ] Create `src/data/validate.py` module
-- [ ] For each image in `working/images/`:
-  - [ ] Check corresponding mask exists (`<basename>_mask.tif`)
-  - [ ] Verify dimensions match (H, W)
-  - [ ] Verify mask is binary (0/255) or threshold if needed
-  - [ ] Compute `mask_coverage` (foreground pixels / total)
-  - [ ] Compute `object_count` via connected components
-- [ ] Generate `splits/all.csv` manifest with columns:
-  - `basename`, `image_path`, `mask_path`, `mask_coverage`, `object_count`, `empty_confirmed`
-- [ ] Generate `splits/qc_report.csv` with validation status and warnings
-- [ ] Print console summary: total images, passed/failed, coverage distribution
-- [ ] Wire up CLI command in `src/cli.py`
+- [ ] Create `src/data/dataset.py` module
+- [ ] Load image (RGB→grayscale) and mask pairs from manifest CSV
+- [ ] Implement patch sampling:
+  - 70% positive-centered (random foreground pixel + jitter up to 25% patch size)
+  - 30% negative (random location with <5% mask coverage)
+  - Configurable `patches_per_image` (default: 20, reduce for sanity check)
+- [ ] Implement augmentations via albumentations:
+  - Horizontal/vertical flip (p=0.5)
+  - 90° rotation (p=0.5)
+  - Brightness/contrast (±10%)
+- [ ] Normalize images to [0, 1] float, masks to binary {0, 1}
+- [ ] Return dict: `{"image": tensor, "mask": tensor}`
 
-### 2. Implement empty image handling
+### 2. Implement basic training loop
 
-- [ ] Flag images where `mask_coverage == 0` and `empty_confirmed` is not set
-- [ ] QC report should clearly list flagged images for manual review
-- [ ] Provide mechanism to mark images as confirmed empty (could be manual CSV edit for POC)
+- [ ] Create `src/training/train.py` module
+- [ ] Load model from segmentation-models-pytorch:
+  - U-Net with ResNet18 encoder, pretrained ImageNet weights
+  - Adapt for 1-channel grayscale input
+- [ ] Implement combined loss: `0.5 × BCE + 0.5 × DiceLoss`
+- [ ] Implement validation Dice metric
+- [ ] Basic training loop with:
+  - Configurable epochs, batch size, learning rate
+  - Validation after each epoch
+  - Print loss and Dice per epoch
+- [ ] Save checkpoint at end
 
-### 3. Implement `make_splits` command
+### 3. Implement prediction overlay visualization
 
-- [ ] Create split logic in `src/data/validate.py` or separate module
-- [ ] Split by image (not patches)
-- [ ] Default ratio: 60% train, 20% val, 20% test
-- [ ] Use deterministic random seed (default: 42)
-- [ ] Optional: stratify by `mask_coverage` buckets
-- [ ] Output: `splits/train.csv`, `splits/val.csv`, `splits/test.csv`
-- [ ] Wire up CLI command
+- [ ] Create function to generate visual overlays:
+  - Original image with GT mask contour (green)
+  - Original image with predicted mask contour (red)
+  - Or blended/side-by-side comparison
+- [ ] Save overlay images to `runs/sanity_check/overlays/`
 
-### 4. Compute spheroid diameter for patch size
+### 4. Implement `sanity_check` CLI command
 
-- [ ] From masks, estimate average spheroid diameter (e.g., mean equivalent diameter from regionprops)
-- [ ] Report recommended patch size (2.5× diameter, rounded to nearest 256/512)
-- [ ] Add to QC summary output
+- [ ] Wire up in `src/cli.py`
+- [ ] Parameters:
+  - `--patches-per-image` (default: 10 for sanity check)
+  - `--epochs` (default: 5)
+  - `--batch-size` (default: 4)
+  - `--output-dir` (default: `runs/sanity_check/`)
+- [ ] Run training on full train set (only 3 images, so no subsetting needed)
+- [ ] Run prediction on validation image(s)
+- [ ] Generate and save overlay visualizations
+- [ ] Print summary: final loss, final val Dice
 
 ### 5. Unit tests
 
-- [ ] Test image/mask pairing detection (valid and missing cases)
-- [ ] Test dimension mismatch detection
-- [ ] Test mask coverage calculation
-- [ ] Test split ratios are approximately correct
-- [ ] Test deterministic seed produces identical splits
+- [ ] Test `PatchDataset` returns correct shapes (256×256 for both image and mask)
+- [ ] Test patch sampling produces expected positive/negative ratio (approximately)
+- [ ] Test augmentations apply identically to image and mask
+- [ ] Test model forward pass produces correct output shape
 
 ---
 
 ## Reference Sections (in docs/SDD.md)
 
-- **Section 3.2:** Naming convention (critical for pairing logic)
-- **Section 3.3:** Data manifest schema (required columns)
-- **Section 7:** Full Phase 1 specification (validation, QC, splits)
-- **Section 9.1:** Patch size formula (2.5× diameter rationale)
+- **Section 8:** Phase 1.5 specification (procedure, exit criteria, visual inspection)
+- **Section 9:** Phase 2 — Patch extraction details (sampling policy, augmentation)
+- **Section 10:** Phase 3 — Model training (architecture, loss, metrics)
 
 ---
 
@@ -84,33 +104,54 @@ Implement dataset validation and split generation: verify image/mask pairing, co
 
 | File | Action | Notes |
 |------|--------|-------|
-| `src/data/validate.py` | Create | Main validation and split logic |
-| `src/cli.py` | Modify | Add `validate_dataset` and `make_splits` commands |
-| `tests/test_validate.py` | Create | Unit tests for validation |
-| `data/splits/` | Create dir | Output location (add to .gitignore except schema) |
+| `src/data/dataset.py` | Create | `PatchDataset` class |
+| `src/training/train.py` | Create | Training loop, loss, metrics |
+| `src/training/visualize.py` | Create | Overlay generation (or include in train.py) |
+| `src/cli.py` | Modify | Add `sanity_check` command |
+| `tests/test_dataset.py` | Create | Unit tests for PatchDataset |
+| `runs/sanity_check/` | Create dir | Output location |
 
 ---
 
 ## What NOT to Do This Session
 
-- Do not implement `PatchDataset` (that's Phase 2/3)
-- Do not implement training loop
-- Do not create config YAML files yet (validation uses CLI args for now)
-- Do not handle multi-channel images (assume grayscale)
-- Do not implement pixel-to-micron conversion (optional future feature)
+- Do not implement full checkpointing strategy (best model, periodic saves)
+- Do not implement early stopping or learning rate scheduling
+- Do not implement tiled inference (that's Phase 4)
+- Do not implement config YAML loading (use CLI args for now)
+- Do not optimize for performance (this is validation, not production)
+- Do not worry about the small dataset size—we're checking pipeline correctness, not model quality
 
 ---
 
-## Completion Criteria
+## Completion Criteria (Exit Criteria for Phase 1.5)
 
 This session is complete when:
 
-1. `validate_dataset --input-dir data/working/ --output-dir data/splits/` runs successfully
-2. `splits/all.csv` contains all images with required columns
-3. `splits/qc_report.csv` identifies any validation failures or flagged empties
-4. `make_splits` produces `train.csv`, `val.csv`, `test.csv` with no overlap
-5. Console output shows coverage distribution and recommended patch size
-6. Unit tests pass: `pytest tests/test_validate.py`
+1. `sanity_check` command runs without errors
+2. **Loss decreases** over the 5 epochs (model is learning)
+3. **Predictions are spatially coherent** (not random noise or uniform output)
+4. **Overlay images** show predicted masks correspond to actual spheroid locations
+5. **No systematic offset** between predictions and ground truth (no data pipeline bugs)
+6. Unit tests pass: `pytest tests/test_dataset.py`
+7. **Go/no-go decision documented** in Notes section below
+
+If any exit criterion fails, investigate and fix before proceeding to Phase 3.
+
+---
+
+## Expected Output Example
+
+```
+Epoch 1/5 - Loss: 0.682 - Val Dice: 0.23
+Epoch 2/5 - Loss: 0.534 - Val Dice: 0.41
+Epoch 3/5 - Loss: 0.421 - Val Dice: 0.58
+Epoch 4/5 - Loss: 0.356 - Val Dice: 0.67
+Epoch 5/5 - Loss: 0.312 - Val Dice: 0.72
+
+Sanity check complete. Overlays saved to runs/sanity_check/overlays/
+Visual inspection required before proceeding to full training.
+```
 
 ---
 
@@ -124,4 +165,4 @@ _Update during session:_
 
 ## Next Session Preview
 
-**Phase 1.5 (Sanity Check):** Quick training run (5 epochs, 10% data) to validate the full pipeline before committing to real training. Requires `PatchDataset` implementation.
+**Phase 3 (Full Training):** If sanity check passes, implement full training with checkpointing, early stopping, TensorBoard logging, and config YAML support. Train for 100 epochs on the complete dataset.
