@@ -327,19 +327,175 @@ def sanity_check():
 
 
 def train():
-    """Phase 3: Train segmentation model on patches."""
+    """Phase 3: Train segmentation model on patches with production features."""
     parser = argparse.ArgumentParser(
-        description="Train segmentation model"
+        description="Train segmentation model with checkpointing, early stopping, and TensorBoard"
     )
-    parser.add_argument("--config", required=True, help="Path to train.yaml")
-    parser.add_argument("--resume", help="Path to checkpoint to resume from")
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to training config YAML file (e.g., configs/train.yaml)",
+    )
+    parser.add_argument(
+        "--resume",
+        help="Path to checkpoint to resume training from",
+    )
     args = parser.parse_args()
 
-    print(f"[Phase 3] Training model with config: {args.config}")
-    if args.resume:
-        print(f"Resuming from checkpoint: {args.resume}")
-    print("⚠️  Not yet implemented - Phase 3 placeholder")
-    return 0
+    try:
+        import pandas as pd
+        import torch
+        import yaml
+        from datetime import datetime
+        from torch.utils.data import DataLoader
+
+        from src.data.dataset import PatchDataset
+        from src.training.train import load_config, train_model as run_training
+
+        print("\n" + "=" * 80)
+        print("PHASE 3: FULL MODEL TRAINING")
+        print("=" * 80)
+
+        # Load config
+        config_path = Path(args.config)
+        print(f"\nLoading configuration from: {config_path}")
+
+        config = load_config(config_path)
+
+        # Extract config values
+        train_manifest = Path(config['data']['train_manifest'])
+        val_manifest = Path(config['data']['val_manifest'])
+        data_root = Path(config['data'].get('data_root', 'data'))
+
+        patch_size = config['dataset']['patch_size']
+        patches_per_image = config['dataset']['patches_per_image']
+        positive_ratio = config['dataset']['positive_ratio']
+
+        epochs = config['training']['epochs']
+        batch_size = config['training']['batch_size']
+        learning_rate = config['training']['learning_rate']
+        num_workers = config['training']['num_workers']
+
+        # Create unique run directory with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_name = f"train_{timestamp}"
+        run_dir = Path(config['output']['run_dir']) / run_name
+
+        print(f"\nConfiguration:")
+        print(f"  Train manifest: {train_manifest}")
+        print(f"  Val manifest: {val_manifest}")
+        print(f"  Patches per image: {patches_per_image}")
+        print(f"  Patch size: {patch_size}")
+        print(f"  Epochs: {epochs}")
+        print(f"  Batch size: {batch_size}")
+        print(f"  Learning rate: {learning_rate}")
+        print(f"  Run directory: {run_dir}")
+
+        # Early stopping and LR scheduling
+        if config.get('early_stopping', {}).get('enabled', False):
+            print(f"  Early stopping: enabled (patience={config['early_stopping']['patience']})")
+        if config.get('lr_scheduler', {}).get('enabled', False):
+            print(f"  LR scheduler: enabled (ReduceLROnPlateau)")
+        if config.get('tensorboard', {}).get('enabled', False):
+            print(f"  TensorBoard: enabled")
+
+        # Detect device
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            print(f"\n✓ Using GPU: {torch.cuda.get_device_name(0)}")
+        elif torch.backends.mps.is_available():
+            device = torch.device("mps")
+            print("\n✓ Using Apple M1/M2 GPU (MPS)")
+        else:
+            device = torch.device("cpu")
+            print("\n⚠️  Using CPU (training will be slow)")
+
+        # Create datasets
+        print("\nLoading datasets...")
+        train_dataset = PatchDataset(
+            manifest_csv=train_manifest,
+            patch_size=patch_size,
+            patches_per_image=patches_per_image,
+            positive_ratio=positive_ratio,
+            augment=config['dataset']['augmentation']['enabled'],
+            data_root=data_root,
+        )
+
+        val_dataset = PatchDataset(
+            manifest_csv=val_manifest,
+            patch_size=patch_size,
+            patches_per_image=patches_per_image,
+            positive_ratio=positive_ratio,
+            augment=False,  # No augmentation for validation
+            data_root=data_root,
+        )
+
+        # Create data loaders
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=config['training'].get('pin_memory', True) if device.type == "cuda" else False,
+        )
+
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=config['training'].get('pin_memory', True) if device.type == "cuda" else False,
+        )
+
+        print(f"  Train patches: {len(train_dataset)}")
+        print(f"  Val patches: {len(val_dataset)}")
+        print(f"  Train batches per epoch: {len(train_loader)}")
+        print(f"  Val batches per epoch: {len(val_loader)}")
+
+        # Parse resume checkpoint if provided
+        resume_checkpoint = Path(args.resume) if args.resume else None
+        if resume_checkpoint:
+            print(f"\n✓ Resuming from checkpoint: {resume_checkpoint}")
+
+        # Train model
+        print("\nStarting training...\n")
+        history = run_training(
+            config=config,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            device=device,
+            run_dir=run_dir,
+            resume_checkpoint=resume_checkpoint,
+        )
+
+        # Print summary
+        print("\n" + "=" * 80)
+        print("TRAINING COMPLETE")
+        print("=" * 80)
+        print("\nFinal Results:")
+        print(f"  Final Train Loss: {history['train_loss'][-1]:.4f}")
+        print(f"  Final Val Loss: {history['val_loss'][-1]:.4f}")
+        print(f"  Final Train Dice: {history['train_dice'][-1]:.4f}")
+        print(f"  Final Val Dice: {history['val_dice'][-1]:.4f}")
+        print(f"  Best Val Dice: {max(history['val_dice']):.4f} (epoch {history['val_dice'].index(max(history['val_dice'])) + 1})")
+
+        print(f"\nOutputs saved to: {run_dir}")
+        print(f"  - Config: {run_dir / 'config.yaml'}")
+        print(f"  - Best model: {run_dir / 'checkpoints' / 'best_model.pth'}")
+        print(f"  - Final model: {run_dir / 'checkpoints' / 'final_model.pth'}")
+        print(f"  - TensorBoard logs: {run_dir / 'tensorboard'}")
+
+        if config.get('tensorboard', {}).get('enabled', False):
+            print(f"\nView training progress with TensorBoard:")
+            print(f"  tensorboard --logdir={run_dir / 'tensorboard'}")
+
+        print("\n" + "=" * 80 + "\n")
+
+        return 0
+
+    except Exception as e:
+        logging.error(f"Training failed: {e}", exc_info=True)
+        return 1
 
 
 def predict_full():

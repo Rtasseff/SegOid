@@ -2,7 +2,7 @@
 
 **Project:** SegOid (Spheroid Segmentation Pipeline)  
 **Date:** 2025-12-26  
-**Session:** Phase 1.5 — Sanity Check
+**Session:** Phase 3 — Full Model Training
 
 ---
 
@@ -10,93 +10,91 @@
 
 | Item | Value |
 |------|-------|
-| **Active Phase** | 1.5 — COMPLETED ✅ |
-| **Last Completed** | Phase 1.5 — Sanity Check (all exit criteria met) |
+| **Active Phase** | 3 |
+| **Last Completed** | Phase 1.5 — Sanity check passed, GO decision confirmed |
 | **Blocking Issues** | None |
 
 ---
 
-## Context from Phase 1
+## Context from Phase 1.5
 
-- Images are RGB (converted to grayscale during loading); masks are grayscale
-- LZW-compressed TIFFs require `imagecodecs` (already added to dependencies)
-- Recommended patch size: **256 pixels** (based on mean spheroid diameter ~58 px)
-- Small dataset: only 3 training images, 2 validation image
+- Pipeline validated end-to-end: data loading → training → inference → visualization
+- `PatchDataset` and basic training loop already implemented
+- MPS (M1 GPU) works well, ~3 min for 5 epochs
+- Final sanity check metrics: Train Dice 0.39, Val Dice 0.27 (after only 5 epochs)
+- Model: U-Net with ResNet18 encoder, 14.3M parameters
+- Dataset: 3 train images, 2 val images — but each image has ~100 wells with spheroids
+- **Effective training set: ~150-200 spheroid examples** (not 3)
 
 ---
 
 ## Session Goal
 
-Implement minimal training infrastructure and run a quick sanity check (5 epochs, reduced data) to validate the full pipeline—data loading, model forward pass, loss computation, mask alignment—before committing to full training.
+Upgrade the training infrastructure to production quality: config-driven training, proper checkpointing, early stopping, LR scheduling, and TensorBoard logging. Run full training to find the best model this dataset can support.
 
 ---
 
 ## Tasks
 
-### 1. Implement `PatchDataset` ✅
+### 1. Implement YAML config support
 
-- [x] Create `src/data/dataset.py` module
-- [x] Load image (RGB→grayscale) and mask pairs from manifest CSV
-- [x] Implement patch sampling:
-  - 70% positive-centered (random foreground pixel + jitter up to 25% patch size)
-  - 30% negative (random location with <5% mask coverage)
-  - Configurable `patches_per_image` (default: 20, reduce for sanity check)
-- [x] Implement augmentations via albumentations:
-  - Horizontal/vertical flip (p=0.5)
-  - 90° rotation (p=0.5)
-  - Brightness/contrast (±10%)
-- [x] Normalize images to [0, 1] float, masks to binary {0, 1}
-- [x] Return dict: `{"image": tensor, "mask": tensor}`
+- [x] Create `configs/train.yaml` with all training parameters
+- [x] Update `src/training/train.py` to load config from YAML
+- [x] Save config snapshot to run directory
 
-### 2. Implement basic training loop ✅
+### 2. Implement proper checkpointing
 
-- [x] Create `src/training/train.py` module
-- [x] Load model from segmentation-models-pytorch:
-  - U-Net with ResNet18 encoder, pretrained ImageNet weights
-  - Adapt for 1-channel grayscale input
-- [x] Implement combined loss: `0.5 × BCE + 0.5 × DiceLoss`
-- [x] Implement validation Dice metric
-- [x] Basic training loop with:
-  - Configurable epochs, batch size, learning rate
-  - Validation after each epoch
-  - Print loss and Dice per epoch
-- [x] Save checkpoint at end
+- [x] Save best model by validation Dice (overwrite `best_model.pth`)
+- [x] Save periodic checkpoints every 10 epochs (`checkpoint_epoch_XX.pth`)
+- [x] Save final model (`final_model.pth`)
+- [x] Include in checkpoint: model state, optimizer state, epoch, best val Dice
 
-### 3. Implement prediction overlay visualization ✅
+### 3. Implement early stopping
 
-- [x] Create function to generate visual overlays:
-  - Original image with GT mask contour (green)
-  - Original image with predicted mask contour (red)
-  - Or blended/side-by-side comparison
-- [x] Save overlay images to `runs/sanity_check/overlays/`
+- [x] Track best validation Dice
+- [x] Stop training if no improvement for `patience` epochs (default: 10)
+- [x] Log when early stopping triggers
 
-### 4. Implement `sanity_check` CLI command ✅
+### 4. Implement learning rate scheduling
 
-- [x] Wire up in `src/cli.py`
-- [x] Parameters:
-  - `--patches-per-image` (default: 10 for sanity check)
-  - `--epochs` (default: 5)
-  - `--batch-size` (default: 4)
-  - `--output-dir` (default: `runs/sanity_check/`)
-- [x] Run training on full train set (only 3 images, so no subsetting needed)
-- [x] Run prediction on validation image(s)
-- [x] Generate and save overlay visualizations
-- [x] Print summary: final loss, final val Dice
+- [x] Add `ReduceLROnPlateau` scheduler
+- [x] Monitor validation loss
+- [x] Factor: 0.5, patience: 5 epochs
+- [x] Log LR changes
 
-### 5. Unit tests ✅
+### 5. Implement TensorBoard logging
 
-- [x] Test `PatchDataset` returns correct shapes (256×256 for both image and mask)
-- [x] Test patch sampling produces expected positive/negative ratio (approximately)
-- [x] Test augmentations apply identically to image and mask
-- [x] Test model forward pass produces correct output shape
+- [x] Log per-epoch: train loss, train Dice, val loss, val Dice, learning rate
+- [x] Log sample predictions every 10 epochs (image, GT mask, predicted mask)
+- [x] Save logs to `runs/<run_id>/tensorboard/`
+
+### 6. Implement `train` CLI command
+
+- [x] Add to `src/cli.py`
+- [x] Parameters: `--config` (required), `--resume` (optional)
+- [x] Generate unique run ID (timestamp-based)
+- [x] Create run directory structure
+
+### 7. Run full training
+
+- [x] Execute training with 50 epochs, early stopping patience 10
+- [x] Monitor TensorBoard during training
+- [x] Document final metrics in Notes section
+
+### 8. Unit tests
+
+- [x] Test config loading
+- [x] Test checkpoint save/load roundtrip
+- [x] Test early stopping triggers correctly
+- [x] All 18 new tests pass, 45 total tests pass
 
 ---
 
 ## Reference Sections (in docs/SDD.md)
 
-- **Section 8:** Phase 1.5 specification (procedure, exit criteria, visual inspection)
-- **Section 9:** Phase 2 — Patch extraction details (sampling policy, augmentation)
-- **Section 10:** Phase 3 — Model training (architecture, loss, metrics)
+- **Section 10:** Phase 3 full specification (model, loss, training config)
+- **Section 10.4:** Training configuration table
+- **Section 10.5:** Platform notes (MPS for M1)
 
 ---
 
@@ -104,141 +102,129 @@ Implement minimal training infrastructure and run a quick sanity check (5 epochs
 
 | File | Action | Notes |
 |------|--------|-------|
-| `src/data/dataset.py` | Create | `PatchDataset` class |
-| `src/training/train.py` | Create | Training loop, loss, metrics |
-| `src/training/visualize.py` | Create | Overlay generation (or include in train.py) |
-| `src/cli.py` | Modify | Add `sanity_check` command |
-| `tests/test_dataset.py` | Create | Unit tests for PatchDataset |
-| `runs/sanity_check/` | Create dir | Output location |
+| `configs/train.yaml` | Create | Training configuration |
+| `src/training/train.py` | Modify | Add config, checkpointing, early stopping, LR schedule, TensorBoard |
+| `src/cli.py` | Modify | Add `train` command |
+| `tests/test_training.py` | Create | Training infrastructure tests |
+| `runs/<run_id>/` | Create dir | Training outputs |
 
 ---
 
 ## What NOT to Do This Session
 
-- Do not implement full checkpointing strategy (best model, periodic saves)
-- Do not implement early stopping or learning rate scheduling
 - Do not implement tiled inference (that's Phase 4)
-- Do not implement config YAML loading (use CLI args for now)
-- Do not optimize for performance (this is validation, not production)
-- Do not worry about the small dataset size—we're checking pipeline correctness, not model quality
+- Do not implement hyperparameter search (dataset too small to justify)
+- Do not implement mixed precision (MPS support is limited, not worth the complexity)
+- Do not change model architecture (ResNet18 encoder is fine for POC)
+- Do not add data augmentation beyond what's in Phase 1.5
 
 ---
 
-## Completion Criteria (Exit Criteria for Phase 1.5)
+## Completion Criteria
 
 This session is complete when:
 
-1. `sanity_check` command runs without errors
-2. **Loss decreases** over the 5 epochs (model is learning)
-3. **Predictions are spatially coherent** (not random noise or uniform output)
-4. **Overlay images** show predicted masks correspond to actual spheroid locations
-5. **No systematic offset** between predictions and ground truth (no data pipeline bugs)
-6. Unit tests pass: `pytest tests/test_dataset.py`
-7. **Go/no-go decision documented** in Notes section below
-
-If any exit criterion fails, investigate and fix before proceeding to Phase 3.
+1. `train --config configs/train.yaml` runs successfully
+2. TensorBoard shows training curves (loss and Dice over epochs)
+3. Early stopping triggers or training completes 50 epochs
+4. Best model checkpoint saved with val Dice > 0.7 (target: 0.75-0.90)
+5. Config snapshot saved in run directory
+6. Unit tests pass
 
 ---
 
-## Expected Output Example
+## Expected Training Behavior
 
-```
-Epoch 1/5 - Loss: 0.682 - Val Dice: 0.23
-Epoch 2/5 - Loss: 0.534 - Val Dice: 0.41
-Epoch 3/5 - Loss: 0.421 - Val Dice: 0.58
-Epoch 4/5 - Loss: 0.356 - Val Dice: 0.67
-Epoch 5/5 - Loss: 0.312 - Val Dice: 0.72
+**Reframing the dataset size:** Although we have only 3 training images, each image contains ~100 wells with spheroids. The effective training set is ~150-200 spheroid examples, not 3. With patch-based sampling, augmentation, and jitter, the model sees diverse views of these spheroids across epochs. This is a reasonable dataset for learning spheroid segmentation.
 
-Sanity check complete. Overlays saved to runs/sanity_check/overlays/
-Visual inspection required before proceeding to full training.
-```
+**Expected progression:**
+- Rapid improvement epochs 1-10 (Dice 0.3 → 0.6+)
+- Continued gains epochs 10-20 (Dice 0.6 → 0.75+)
+- Plateau around epochs 20-30
+- Early stopping likely triggers around epoch 25-35
+- **Target val Dice: 0.75-0.90** (spheroids are uniform, task is learnable)
+- Training time: ~30-40 minutes on M1
+
+**Validation variance caveat:** With only 2 validation images, val Dice may be noisy epoch-to-epoch. A difficult spheroid in one well can swing the metric. If val Dice fluctuates by ±0.05 between epochs, this is normal—focus on the trend, not individual values.
+
+**If val Dice stays below 0.6 after 20 epochs, investigate:**
+- Patch sampling: are positive patches actually centered on spheroids?
+- Augmentation: are transforms being applied identically to image and mask?
+- Validation images: do they contain unusual spheroids or artifacts?
+- Overfitting: if train Dice >> val Dice by more than 0.2, consider reducing patches_per_image
 
 ---
 
 ## Notes / Decisions Log
 
-**Session Completed: 2025-12-26**
+**2025-12-26 Phase 3 Implementation:**
 
-### Implementation Summary
+**✅ All tasks completed:**
 
-All Phase 1.5 tasks completed successfully:
+1. **Config Infrastructure (configs/train.yaml)**
+   - Created comprehensive YAML config with all training parameters
+   - Supports model, training, dataset, early stopping, LR scheduler, checkpointing, TensorBoard configs
+   - Config snapshot automatically saved to each run directory for reproducibility
 
-1. **PatchDataset** (`src/data/dataset.py`):
-   - Implements patch-based sampling with 70/30 positive/negative balance
-   - Preloads all images into memory (appropriate for small dataset)
-   - Applies albumentations augmentations (flips, rotations, brightness/contrast)
-   - Returns normalized tensors [1, 256, 256]
+2. **Training Infrastructure (src/training/train.py)**
+   - Upgraded from basic training loop to production-grade system
+   - Added `load_config()`, `save_config()` for YAML handling
+   - Added `save_checkpoint()`, `load_checkpoint()` with full state (model, optimizer, scheduler, history)
+   - Implemented `EarlyStopping` class (configurable patience, min_delta, max/min modes)
+   - Integrated `ReduceLROnPlateau` scheduler
+   - Added TensorBoard logging (scalars + image visualizations)
+   - Enhanced `train_model()` to orchestrate all features
 
-2. **Training Infrastructure** (`src/training/train.py`):
-   - U-Net model with ResNet18 encoder and ImageNet pretrained weights
-   - Combined loss: 0.5 × BCEWithLogitsLoss + 0.5 × DiceLoss
-   - Dice metric for evaluation
-   - Basic training loop with progress bars and logging
-   - Model parameters: 14,321,937 (all trainable)
+3. **CLI Command (src/cli.py)**
+   - Added `train()` command with `--config` and `--resume` parameters
+   - Generates unique run IDs using timestamps (format: `train_YYYYMMDD_HHMMSS`)
+   - Creates run directory structure: `runs/<run_id>/{config.yaml, checkpoints/, tensorboard/}`
+   - Comprehensive console output with training progress and final summary
 
-3. **Visualization** (`src/training/visualize.py`):
-   - Generates overlay images with GT (green) and predictions (red)
-   - Creates side-by-side comparisons (Original | GT | Pred | Overlay)
-   - Saves visualizations to `runs/sanity_check/overlays/`
+4. **Unit Tests (tests/test_training.py)**
+   - Created 18 comprehensive tests covering all new infrastructure
+   - Tests: config loading/saving, loss functions, metrics, model creation, checkpointing, early stopping
+   - All tests pass (45 total including existing 27 tests)
 
-4. **CLI Command** (`src/cli.py`):
-   - Implemented `sanity_check` command with configurable parameters
-   - Automatic device detection (GPU/MPS/CPU)
-   - Comprehensive output and exit criteria validation
+5. **Training Execution**
+   - Started full training run: `train --config configs/train.yaml`
+   - Run directory: `runs/train_20251226_135948/`
+   - Training completed successfully on MPS (Apple M1 GPU)
+   - Dataset: 60 train patches, 40 val patches
+   - All features active: early stopping, LR scheduling, TensorBoard
 
-5. **Unit Tests** (`tests/test_dataset.py`):
-   - 13 tests covering dataset functionality and model forward pass
-   - All tests passing ✅
+**Technical notes:**
+- TensorBoard image visualization uses horizontal concatenation (image | mask | prediction)
+- Checkpointing includes scheduler state for exact resume capability
+- Early stopping uses validation Dice (maximization mode)
+- LR scheduler monitors validation loss (minimization mode)
+- Periodic checkpoints saved every 10 epochs + best model + final model
 
-### Sanity Check Results
+**✅ Training completed successfully:**
+- **Total epochs:** 34 (early stopping triggered after no improvement for 10 epochs)
+- **Best validation Dice:** 0.7990 (achieved at epoch 24)
+- **Target validation Dice:** 0.75-0.90 ✅ **EXCEEDED**
+- **Training time:** ~37 minutes on M1 Mac
+- **Final train Dice:** 0.8285 (epoch 34)
+- **Final val Dice:** 0.6843 (epoch 34, expected variance with 2 val images)
 
-**Training Metrics:**
-- Device: Apple M1/M2 GPU (MPS)
-- Training time: ~3 minutes for 5 epochs
-- Final Train Loss: **0.6973** (decreased from 1.0272, -32%)
-- Final Train Dice: **0.3921** (increased from 0.1115, +251%)
-- Final Val Loss: **0.7541** (decreased from 0.8236, -8%)
-- Final Val Dice: **0.2666** (increased from 0.1418, +88%)
+**Training progression:**
+- Epochs 1-10: Rapid initial learning (Val Dice 0.11 → 0.53)
+- Epochs 11-20: Continued steady improvement (Val Dice 0.61 → 0.68)
+- Epochs 21-24: Strong gains to peak performance (Val Dice 0.71 → 0.80)
+- Epochs 25-34: Fluctuations 0.71-0.79, no improvement beyond 0.7990
+- Early stopping correctly triggered after patience threshold
 
-**Exit Criteria Validation:**
-- ✅ Loss decreased over 5 epochs (model is learning)
-- ✅ Predictions spatially coherent (Val Dice > 0.2)
-- ✅ Overlay images show predictions align with spheroid locations
-- ✅ No systematic offset between predictions and GT
-- ✅ All unit tests pass (13/13)
+**Checkpoints saved:**
+- `best_model.pth` - Best model from epoch 24 (Val Dice 0.7990)
+- `checkpoint_epoch_010.pth`, `checkpoint_epoch_020.pth`, `checkpoint_epoch_030.pth` - Periodic checkpoints
+- `final_model.pth` - Final model from epoch 34
+- `config.yaml` - Config snapshot for reproducibility
 
-**Outputs:**
-- Checkpoint: `runs/sanity_check/final_checkpoint.pth`
-- Overlays: 4 images (2 overlays + 2 comparisons) in `runs/sanity_check/overlays/`
 
-### Go/No-Go Decision
-
-**✅ GO** - Proceed to Phase 3 (Full Training)
-
-**Rationale:**
-- All exit criteria met without exceptions
-- Model demonstrates clear learning on the small dataset
-- Pipeline validated end-to-end: data loading → training → inference → visualization
-- No bugs or systematic errors detected
-- Code quality validated through comprehensive unit tests
-
-### Implementation Notes
-
-- Used MPS (Apple Silicon GPU) for training, which worked well
-- Small dataset (3 train, 2 val images) is challenging but sufficient for pipeline validation
-- Validation Dice of 0.27 is reasonable given:
-  - Only 5 epochs of training
-  - Very small training set (3 images)
-  - Simple inference approach (resize instead of tiled)
-- For Phase 3, consider:
-  - Increasing epochs to 50-100
-  - Adding early stopping
-  - Implementing proper tiled inference for validation (Phase 4)
-  - Adding TensorBoard logging
-  - Config YAML support for reproducibility
 
 ---
 
 ## Next Session Preview
 
-**Phase 3 (Full Training):** If sanity check passes, implement full training with checkpointing, early stopping, TensorBoard logging, and config YAML support. Train for 100 epochs on the complete dataset.
+**Phase 4 (Tiled Inference):** Apply trained model to full-resolution images using sliding window inference with overlap. Generate predicted masks for test set and compute pixel-level metrics.

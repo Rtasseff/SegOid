@@ -6,8 +6,8 @@ Operational guide for Claude Code working in this repository.
 
 **SegOid** — PyTorch U-Net pipeline for spheroid segmentation in microscopy images. Trains on patches, infers on full images via tiling, outputs binary masks and morphology metrics.
 
-**Current Phase:** 1.5 (Sanity check)  
-**Last Completed:** Phase 1 (Validation and splits — 6 images: 3 train, 1 val, 2 test)
+**Current Phase:** 3 (Full model training)  
+**Last Completed:** Phase 1.5/2 (Sanity check — GO decision confirmed)
 
 For design rationale, phase details, and architectural decisions, see `docs/SDD.md`.
 
@@ -20,13 +20,14 @@ pip install -e .
 
 # Testing
 pytest
-pytest tests/test_dataset.py
 pytest --cov=src tests/
 
-# Pipeline (as implemented)
+# Pipeline commands
 validate_dataset --input-dir data/working/ --output-dir data/splits/
 make_splits --manifest data/splits/all.csv --seed 42 --output-dir data/splits/
-# sanity_check, train, predict_full, quantify_objects — not yet implemented
+sanity_check --patches-per-image 10 --epochs 5 --output-dir runs/sanity_check/
+train --config configs/train.yaml
+# predict_full, quantify_objects — not yet implemented
 ```
 
 ## Directory Structure
@@ -76,11 +77,10 @@ Python 3.11+, PyTorch, segmentation-models-pytorch, albumentations, tifffile, im
 
 ## Session Workflow
 
-1. Ask user if we need to git pull origin to sync project before starting
-2. Read `CURRENT_TASK.md` for session goals and scope
-3. Consult `docs/SDD.md` sections as referenced in task file
-4. Update task file completion checkboxes as you progress
-5. Note any decisions or issues in the task file's log section
+1. Read `CURRENT_TASK.md` for session goals and scope
+2. Consult `docs/SDD.md` sections as referenced in task file
+3. Update task file completion checkboxes as you progress
+4. Note any decisions or issues in the task file's log section
 
 ## Code Style
 

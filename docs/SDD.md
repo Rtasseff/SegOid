@@ -4,9 +4,7 @@
 **Last updated:** 2025-01-15
 
 ## Current Status
-**Active Phase:** 1.5 
-**Last Completed:** Phase 1 (Image curation and dataset splits)
-**Blocking Issues:** None
+**Active Phase:** 3
 **Next Action:** See CURRENT_TASK.md
 
 ## 1. Problem statement
