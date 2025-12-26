@@ -1,0 +1,28 @@
+# Phase 2: Patch extraction and augmentation configuration
+#
+# This config defines parameters for patch-based sampling and data augmentation.
+# Used by PatchDataset for training and validation data pipelines.
+
+# Patch sampling parameters
+patch_size: 256  # Patch dimensions (pixels) - set to 2.5× mean spheroid diameter
+positive_ratio: 0.7  # Fraction of patches centered on foreground (0.7 = 70%)
+patches_per_image: 20  # Number of patches to sample per image per epoch
+
+# Negative patch sampling
+negative_threshold: 0.05  # Max mask coverage for negative patches (5%)
+
+# Positive patch sampling
+max_jitter: 0.25  # Max jitter as fraction of patch size (25%)
+
+# Data augmentation (applied during training only)
+augmentation:
+  enabled: true
+  horizontal_flip: 0.5  # Probability of horizontal flip
+  vertical_flip: 0.5  # Probability of vertical flip
+  rotate_90: 0.5  # Probability of 90° rotation (randomly 90/180/270)
+  brightness_limit: 0.1  # Brightness adjustment range (±10%)
+  contrast_limit: 0.1  # Contrast adjustment range (±10%)
+
+# Data pipeline
+num_workers: 2  # Number of data loader workers (increase on Linux GPU)
+pin_memory: true  # Pin memory for faster GPU transfer (set false for CPU)

@@ -1,0 +1,65 @@
+# Phase 1.5: Sanity check configuration
+#
+# Quick pipeline validation before full training.
+# Uses reduced data and minimal epochs to verify:
+# - Data loading works correctly
+# - Model trains (loss decreases)
+# - Predictions are spatially coherent
+# - No systematic offset between predictions and ground truth
+
+# Data manifests
+data:
+  train_manifest: data/splits/train.csv
+  val_manifest: data/splits/val.csv
+  data_root: data  # Root directory for resolving relative paths in manifests
+
+# Dataset configuration (inherits from dataset.yaml but with overrides)
+dataset:
+  patch_size: 256
+  patches_per_image: 10  # Reduced from default 20 for sanity check
+  positive_ratio: 0.7
+  negative_threshold: 0.05
+  max_jitter: 0.25
+  augmentation:
+    enabled: true  # Enable augmentations for training
+    horizontal_flip: 0.5
+    vertical_flip: 0.5
+    rotate_90: 0.5
+    brightness_limit: 0.1
+    contrast_limit: 0.1
+
+# Model architecture
+model:
+  architecture: unet
+  encoder: resnet18
+  encoder_weights: imagenet
+  in_channels: 1  # Grayscale input
+  classes: 1  # Binary segmentation
+
+# Training parameters
+training:
+  epochs: 5  # Minimal epochs for sanity check
+  batch_size: 4  # Small batch for development/testing
+  learning_rate: 0.0001  # 1e-4
+  num_workers: 2
+  pin_memory: true
+
+# Loss function
+loss:
+  bce_weight: 0.5  # Weight for BCE loss
+  dice_weight: 0.5  # Weight for Dice loss
+
+# Output
+output:
+  run_dir: runs/sanity_check
+  save_overlays: true
+  num_overlay_samples: null  # null = all validation images
+
+# Validation
+validation:
+  prediction_threshold: 0.5  # Threshold for binarizing predictions
+
+# Exit criteria thresholds
+exit_criteria:
+  min_dice_improvement: 0.0  # Minimum dice to consider learning
+  spatial_coherence_threshold: 0.2  # Dice > 0.2 indicates spatial coherence
