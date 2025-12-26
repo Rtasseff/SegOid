@@ -1,0 +1,84 @@
+# Phase 6: Cross-validation configuration
+#
+# Leave-one-out cross-validation for the 6 labeled images.
+# This provides robust performance estimates and trains models that have seen
+# all available data (5/6 images per fold).
+
+# Cross-validation strategy
+cv:
+  strategy: leave_one_out  # Options: leave_one_out, k_fold
+  source_manifest: data/splits/all.csv  # Manifest with all labeled images
+  seed: 42
+  # n_folds: 5  # Only used if strategy is k_fold
+
+# Dataset configuration (inherited by all folds)
+dataset:
+  patch_size: 256
+  patches_per_image: 20  # Full sampling for production training
+  positive_ratio: 0.7
+  negative_threshold: 0.05
+  max_jitter: 0.25
+  augmentation:
+    enabled: true
+    horizontal_flip: 0.5
+    vertical_flip: 0.5
+    rotate_90: 0.5
+    brightness_limit: 0.1
+    contrast_limit: 0.1
+
+# Model architecture (same for all folds)
+model:
+  architecture: unet
+  encoder: resnet18
+  encoder_weights: imagenet
+  in_channels: 1  # Grayscale input
+  classes: 1  # Binary segmentation
+
+# Training parameters (same for all folds)
+training:
+  epochs: 50  # Maximum epochs (early stopping will likely trigger before this)
+  batch_size: 4
+  learning_rate: 0.0001  # 1e-4
+  num_workers: 2
+  pin_memory: true
+
+# Loss function
+loss:
+  bce_weight: 0.5  # Weight for BCE loss
+  dice_weight: 0.5  # Weight for Dice loss
+
+# Early stopping
+early_stopping:
+  enabled: true
+  patience: 10  # Stop if no val Dice improvement for 10 epochs
+  min_delta: 0.0001  # Minimum improvement to count as progress
+
+# Learning rate scheduling
+lr_scheduler:
+  enabled: true
+  mode: min  # Monitor validation loss (minimize)
+  factor: 0.5  # Reduce LR by half
+  patience: 5  # Reduce LR if no improvement for 5 epochs
+  min_lr: 0.00001  # 1e-5
+
+# Checkpointing (per fold)
+checkpointing:
+  save_best: true  # Save best model by val Dice
+  save_periodic: false  # Don't save periodic checkpoints to save space
+  save_final: true  # Save final model after training
+
+# TensorBoard logging (per fold)
+tensorboard:
+  enabled: true
+  log_interval: 1  # Log metrics every epoch
+  image_interval: 10  # Log sample predictions every 10 epochs
+  num_image_samples: 4  # Number of validation samples to visualize
+
+# Output configuration
+output:
+  cv_dir: runs/cv_loocv  # Base directory for CV experiment
+  # Individual fold outputs will be in: cv_dir/folds/fold_N/
+
+# Validation
+validation:
+  prediction_threshold: 0.5  # Threshold for binarizing predictions
