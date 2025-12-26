@@ -889,3 +889,52 @@ def quantify_objects():
     except Exception as e:
         logging.error(f"Object quantification failed: {e}", exc_info=True)
         return 1
+
+
+def run_cv():
+    """Phase 6: Run cross-validation experiment."""
+    parser = argparse.ArgumentParser(
+        description="Run cross-validation experiment with configurable strategy"
+    )
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to CV config YAML file (e.g., configs/cv_config.yaml)",
+    )
+    parser.add_argument(
+        "--folds",
+        help="Comma-separated list of specific folds to run (e.g., '0,1,2'). "
+        "If not specified, all folds will be run.",
+    )
+    args = parser.parse_args()
+
+    try:
+        from src.training.cross_validation import run_cross_validation
+
+        print("\n" + "=" * 80)
+        print("PHASE 6: CROSS-VALIDATION")
+        print("=" * 80)
+
+        config_path = Path(args.config)
+        print(f"\nLoading configuration from: {config_path}")
+
+        # Parse folds argument if provided
+        folds = None
+        if args.folds:
+            try:
+                folds = [int(f.strip()) for f in args.folds.split(",")]
+                print(f"Running specific folds: {folds}")
+            except ValueError:
+                print(f"Error: Invalid folds specification '{args.folds}'")
+                print("Expected format: '0,1,2' (comma-separated integers)")
+                return 1
+
+        # Run cross-validation
+        summary = run_cross_validation(config_path, folds=folds)
+
+        # Return success
+        return 0
+
+    except Exception as e:
+        logging.error(f"Cross-validation failed: {e}", exc_info=True)
+        return 1

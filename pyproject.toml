@@ -47,6 +47,7 @@ sanity_check = "src.cli:sanity_check"
 train = "src.cli:train"
 predict_full = "src.cli:predict_full"
 quantify_objects = "src.cli:quantify_objects"
+run_cv = "src.cli:run_cv"
 
 [tool.setuptools.packages.find]
 where = ["."]
