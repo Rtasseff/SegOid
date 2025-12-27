@@ -42,17 +42,17 @@ Implement cross-validation infrastructure: configurable split generation, traini
 
 ### 1. Implement CV split generation
 
-- [ ] Create `src/data/cross_validation.py` module
-- [ ] Implement `generate_loocv_splits(manifest, output_dir, seed)`:
+- [x] Create `src/data/cross_validation.py` module
+- [x] Implement `generate_loocv_splits(manifest, output_dir, seed)`:
   - Read source manifest (all 6 images)
   - Generate N fold directories, each with `train.csv` and `val.csv`
   - Leave-one-out: fold_i trains on all except image_i, validates on image_i
   - Save `cv_meta.yaml` with fold-to-image mapping
-- [ ] Implement `generate_kfold_splits(manifest, output_dir, n_folds, seed)` (for future flexibility)
+- [x] Implement `generate_kfold_splits(manifest, output_dir, n_folds, seed)` (for future flexibility)
 
 ### 2. Create CV configuration schema
 
-- [ ] Create `configs/cv_config.yaml`:
+- [x] Create `configs/cv_config.yaml`:
   ```yaml
   cv:
     strategy: leave_one_out  # or k_fold
@@ -72,11 +72,11 @@ Implement cross-validation infrastructure: configurable split generation, traini
   output:
     cv_dir: runs/cv_001/
   ```
-- [ ] Implement config loading with defaults and validation
+- [x] Implement config loading with defaults and validation
 
 ### 3. Implement CV orchestrator
 
-- [ ] Implement `run_cross_validation(cv_config_path)`:
+- [x] Implement `run_cross_validation(cv_config_path)`:
   - Load and validate config
   - Create CV output directory structure
   - Save config snapshot
@@ -90,36 +90,37 @@ Implement cross-validation infrastructure: configurable split generation, traini
 
 ### 4. Implement result aggregation
 
-- [ ] Compute per-fold metrics:
+- [x] Compute per-fold metrics:
   - best_val_dice, best_epoch, final_train_dice, training_time
-- [ ] Compute aggregate statistics:
+- [x] Compute aggregate statistics:
   - mean, std, min, max for val Dice
   - identify best and worst performing folds
-- [ ] Save outputs:
+- [x] Save outputs:
   - `results/fold_metrics.csv` — one row per fold
   - `results/summary.yaml` — aggregate statistics
 
 ### 5. Implement `run_cv` CLI command
 
-- [ ] Add to `src/cli.py`
-- [ ] Parameters:
+- [x] Add to `src/cli.py`
+- [x] Parameters:
   - `--config` (required): path to CV config YAML
   - `--folds` (optional): specific folds to run (e.g., "0,2,5" for subset)
-  - `--resume` (optional): resume interrupted CV run
-- [ ] Progress output showing fold completion
+  - `--resume` (optional): resume interrupted CV run (deferred - not critical for Phase 6)
+- [x] Progress output showing fold completion
 
 ### 6. Run full CV experiment
 
-- [ ] Execute 6-fold LOO CV on current dataset
-- [ ] Monitor training (can run overnight if needed)
+- [x] Integration test: 2-fold subset completed successfully (verified pipeline works end-to-end)
+- [ ] Execute full 6-fold LOO CV on current dataset (in progress - running in background)
 - [ ] Document results in Notes section
 
 ### 7. Unit tests
 
-- [ ] Test LOOCV split generation (correct train/val sizes per fold)
-- [ ] Test k-fold split generation
-- [ ] Test config loading and validation
-- [ ] Test result aggregation computation
+- [x] Test LOOCV split generation (correct train/val sizes per fold)
+- [x] Test k-fold split generation
+- [x] Test config loading and validation
+- [x] Test result aggregation computation
+- [x] All 17 tests passing
 
 ---
 
@@ -277,7 +278,41 @@ This session is complete when:
 
 _Update during session:_
 
-- 
+**Phase 6 Implementation Complete (2025-12-27)**
+
+**Files Created:**
+- `src/data/cross_validation.py` - LOOCV and k-fold split generation (164 lines)
+- `src/training/cross_validation.py` - CV orchestration and result aggregation (334 lines)
+- `configs/cv_config.yaml` - Production CV configuration
+- `configs/cv_test_quick.yaml` - Quick test configuration for verification
+- `tests/test_cross_validation.py` - 17 unit tests (all passing)
+
+**CLI Command Added:**
+- `run_cv --config <path> [--folds 0,1,2]` - registered in pyproject.toml
+
+**Integration Test Results (2-fold subset with minimal config):**
+- Pipeline executed successfully end-to-end
+- Directory structure created correctly
+- Results properly aggregated in fold_metrics.csv and summary.yaml
+- Total time: ~0.19 minutes for 2 folds with 2 epochs, 5 patches/image
+- Verified: split generation, config loading, training loop, checkpointing, result aggregation
+
+**Design Decisions:**
+- Reused existing `train_model()` function - no modifications needed to core training code
+- CV orchestrator creates fold-specific configs and data loaders, then calls `train_model()`
+- Supports both LOOCV and k-fold strategies via config
+- `--folds` parameter allows running subset of folds for debugging
+- scikit-learn added as dependency for k-fold splitting
+- Resume functionality deferred (not critical for Phase 6)
+
+**Test Coverage:**
+- Split generation: 12 tests (LOOCV and k-fold correctness, overlap checking, metadata)
+- CV orchestration: 5 tests (config loading, fold config creation, result aggregation)
+- All 17 tests passing
+
+**Next Steps:**
+- Full 6-fold LOOCV CV execution (estimated ~4 hours, 50 epochs with early stopping)
+- Results will provide robust performance estimate with mean ± std across all 6 images 
 
 ---
 
