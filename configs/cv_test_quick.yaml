@@ -1,0 +1,54 @@
+# Quick test CV config for integration testing
+# Minimal epochs and patches for fast verification
+
+cv:
+  strategy: leave_one_out
+  source_manifest: data/splits/all.csv
+  seed: 42
+
+dataset:
+  patch_size: 256
+  patches_per_image: 5  # Minimal patches for quick test
+  positive_ratio: 0.7
+  negative_threshold: 0.05
+  max_jitter: 0.25
+  augmentation:
+    enabled: false  # Disabled for faster testing
+
+model:
+  architecture: unet
+  encoder: resnet18
+  encoder_weights: imagenet
+  in_channels: 1
+  classes: 1
+
+training:
+  epochs: 2  # Minimal epochs for quick test
+  batch_size: 4
+  learning_rate: 0.0001
+  num_workers: 0  # Disable multiprocessing for stability
+  pin_memory: false
+
+loss:
+  bce_weight: 0.5
+  dice_weight: 0.5
+
+early_stopping:
+  enabled: false  # Disabled for testing
+
+lr_scheduler:
+  enabled: false  # Disabled for testing
+
+checkpointing:
+  save_best: true
+  save_periodic: false
+  save_final: true
+
+tensorboard:
+  enabled: false  # Disabled for faster testing
+
+output:
+  cv_dir: runs/cv_quick_test
+
+validation:
+  prediction_threshold: 0.5
