@@ -335,3 +335,82 @@ def aggregate_results(fold_results: List[Dict]) -> Dict[str, Any]:
     }
 
     return summary
+
+
+def generate_cv_report(cv_dir: Path) -> None:
+    """
+    Generate a markdown summary report for CV experiment.
+
+    Args:
+        cv_dir: Path to CV experiment directory containing results/
+    """
+    cv_dir = Path(cv_dir)
+    results_dir = cv_dir / "results"
+
+    if not results_dir.exists():
+        raise ValueError(f"Results directory not found: {results_dir}")
+
+    fold_metrics_path = results_dir / "fold_metrics.csv"
+    summary_path = results_dir / "summary.yaml"
+
+    if not fold_metrics_path.exists():
+        raise ValueError(f"Fold metrics not found: {fold_metrics_path}")
+    if not summary_path.exists():
+        raise ValueError(f"Summary not found: {summary_path}")
+
+    # Load results
+    fold_metrics = pd.read_csv(fold_metrics_path)
+    with open(summary_path) as f:
+        summary = yaml.safe_load(f)
+
+    # Generate report
+    report = f"""# Cross-Validation Report
+
+**Experiment:** {cv_dir.name}
+**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M")}
+**Strategy:** {summary.get('cv_strategy', 'leave_one_out')}
+
+## Summary
+
+| Metric | Mean | Std | Min | Max |
+|--------|------|-----|-----|-----|
+| Val Dice | {summary['val_dice']['mean']:.4f} | {summary['val_dice']['std']:.4f} | {summary['val_dice']['min']:.4f} | {summary['val_dice']['max']:.4f} |
+
+## Per-Fold Results
+
+| Fold | Val Image | Best Val Dice | Best Epoch | Training Time (min) |
+|------|-----------|---------------|------------|---------------------|
+"""
+
+    for _, row in fold_metrics.iterrows():
+        report += f"| {int(row['fold'])} | {row['val_image']} | {row['best_val_dice']:.4f} | {int(row['best_epoch'])} | {row['training_time_min']:.1f} |\n"
+
+    # Get best and worst fold details
+    best_fold_idx = summary['best_fold']
+    worst_fold_idx = summary['worst_fold']
+    best_fold_row = fold_metrics[fold_metrics['fold'] == best_fold_idx].iloc[0]
+    worst_fold_row = fold_metrics[fold_metrics['fold'] == worst_fold_idx].iloc[0]
+
+    report += f"""
+## Analysis
+
+- **Best performing fold:** {best_fold_idx} (Image: {best_fold_row['val_image']}, Dice: {summary['best_fold_dice']:.4f})
+- **Worst performing fold:** {worst_fold_idx} (Image: {worst_fold_row['val_image']}, Dice: {summary['worst_fold_dice']:.4f})
+- **Total training time:** {summary.get('total_training_time_min', 0):.1f} minutes
+- **Number of folds:** {summary['n_folds_completed']}
+
+## Conclusion
+
+Cross-validation complete with {summary['n_folds_completed']} folds.
+**Expected generalization performance:** {summary['val_dice']['mean']:.4f} ± {summary['val_dice']['std']:.4f} Dice score.
+
+This represents the model's estimated performance on unseen data from the same distribution.
+"""
+
+    # Save report
+    report_path = results_dir / "REPORT.md"
+    with open(report_path, "w") as f:
+        f.write(report)
+
+    logger.info(f"Report saved to {report_path}")
+    print(f"Report saved to {report_path}")
