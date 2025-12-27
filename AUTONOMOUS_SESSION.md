@@ -39,11 +39,7 @@ Implement Phase 6 (Cross-Validation Infrastructure) completely while the user is
    - Move to the next task
    - The user will resolve blockers on return
 
-7. **Do not run the full 6-fold CV.** It takes ~4 hours. Instead:
-   - Implement everything
-   - Test with a 2-fold subset: `run_cv --config configs/cv_config.yaml --folds 0,1`
-   - Confirm it works end-to-end
-   - Leave the full run for the user
+7. **Do not skip folds.** Run all 6 folds of leave-one-out CV. Each fold will train until early stopping triggers (plateau). This may take 4-6 hours total—that's fine, let it run.
 
 ---
 
@@ -113,36 +109,101 @@ Commit:
 git add -A && git commit -m "feat: add run_cv CLI command"
 ```
 
-### Step 6: Integration test (2 folds only)
-Create a test CV config that only uses 2 folds for speed:
+### Step 6: Run full 6-fold CV
+Run the complete cross-validation:
 ```bash
-# Create a quick test config or use --folds 0,1
-python -m src.cli run_cv --config configs/cv_config.yaml --folds 0,1
+python -m src.cli run_cv --config configs/cv_config.yaml
 ```
 
-This should:
+This will:
 - Create `runs/cv_<timestamp>/`
-- Train 2 folds (takes ~70-80 min total)
+- Train all 6 folds (each until early stopping plateau)
 - Generate `fold_metrics.csv` and `summary.yaml`
+- Total time: ~4-6 hours
 
-If time permits, let this run. If not, at least verify the orchestration starts correctly and creates the expected directory structure.
+Let it run to completion. Do not interrupt.
+
+Commit after completion:
+```bash
+git add -A && git commit -m "results: complete 6-fold LOOCV experiment"
+```
+
+### Step 7: Generate summary report
+After CV completes, create a markdown report summarizing results.
+
+Create `runs/cv_<experiment_id>/results/REPORT.md`:
+
+```python
+# Add this function to src/training/cross_validation.py or create a separate script
+
+def generate_cv_report(cv_dir: Path) -> None:
+    """Generate a markdown summary report for CV experiment."""
+    import pandas as pd
+    import yaml
+    from datetime import datetime
+    
+    results_dir = cv_dir / "results"
+    fold_metrics = pd.read_csv(results_dir / "fold_metrics.csv")
+    
+    with open(results_dir / "summary.yaml") as f:
+        summary = yaml.safe_load(f)
+    
+    report = f"""# Cross-Validation Report
+
+**Experiment:** {cv_dir.name}  
+**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M")}
+
+## Summary
+
+| Metric | Mean | Std | Min | Max |
+|--------|------|-----|-----|-----|
+| Val Dice | {summary['val_dice']['mean']:.4f} | {summary['val_dice']['std']:.4f} | {summary['val_dice']['min']:.4f} | {summary['val_dice']['max']:.4f} |
+
+## Per-Fold Results
+
+| Fold | Val Image | Best Val Dice | Best Epoch | Training Time |
+|------|-----------|---------------|------------|---------------|
+"""
+    
+    for _, row in fold_metrics.iterrows():
+        report += f"| {int(row['fold'])} | {row['val_image']} | {row['best_val_dice']:.4f} | {int(row['best_epoch'])} | {row['training_time_min']:.1f} min |\n"
+    
+    report += f"""
+## Analysis
+
+- **Best performing fold:** {summary['best_fold']} (Dice: {fold_metrics.loc[fold_metrics['fold']==summary['best_fold'], 'best_val_dice'].values[0]:.4f})
+- **Worst performing fold:** {summary['worst_fold']} (Dice: {fold_metrics.loc[fold_metrics['fold']==summary['worst_fold'], 'best_val_dice'].values[0]:.4f})
+- **Total training time:** {summary.get('total_training_time_min', 0):.1f} minutes
+
+## Conclusion
+
+Cross-validation complete with {summary['n_folds']} folds.  
+Expected generalization performance: **{summary['val_dice']['mean']:.4f} ± {summary['val_dice']['std']:.4f}** Dice score.
+"""
+    
+    with open(results_dir / "REPORT.md", "w") as f:
+        f.write(report)
+    
+    print(f"Report saved to {results_dir / 'REPORT.md'}")
+```
+
+Call this function at the end of `run_cross_validation()` or run it separately after CV completes.
 
 Commit:
 ```bash
-git add -A && git commit -m "test: verify CV pipeline with 2-fold subset"
+git add -A && git commit -m "feat: add CV summary report generation"
 ```
 
-### Step 7: Update documentation
-- Check off completed tasks in `CURRENT_TASK.md`
-- Add implementation notes to the Notes section
+### Step 8: Update documentation
+- Add implementation notes to the Notes section of any task files
 - Update `CLAUDE.md` if any new commands or conventions were added
 
 Commit:
 ```bash
-git add -A && git commit -m "docs: update task completion status"
+git add -A && git commit -m "docs: update documentation with CV implementation notes"
 ```
 
-### Step 8: Final test suite
+### Step 9: Final test suite
 ```bash
 pytest --cov=src tests/ -v
 ```
@@ -151,7 +212,7 @@ All tests should pass. If any fail, fix them before stopping.
 
 Final commit:
 ```bash
-git add -A && git commit -m "chore: Phase 6 implementation complete (pending full CV run)"
+git add -A && git commit -m "chore: Phase 6 complete - 6-fold LOOCV with report"
 ```
 
 ---
@@ -460,9 +521,11 @@ def aggregate_results(fold_results: List[Dict]) -> Dict[str, Any]:
 - [ ] `src/training/cross_validation.py` exists and has tests
 - [ ] `configs/cv_config.yaml` exists
 - [ ] `run_cv` CLI command works (`run_cv --help` shows options)
-- [ ] All tests pass (`pytest`)
-- [ ] At least a 2-fold test run completed successfully (or documented why not)
-- [ ] CURRENT_TASK.md updated with progress
+- [ ] All unit tests pass (`pytest`)
+- [ ] Full 6-fold CV completed successfully
+- [ ] `runs/cv_<id>/results/fold_metrics.csv` contains all 6 folds
+- [ ] `runs/cv_<id>/results/summary.yaml` contains aggregated statistics
+- [ ] `runs/cv_<id>/results/REPORT.md` contains human-readable summary
 - [ ] All changes committed to git
 
 ---

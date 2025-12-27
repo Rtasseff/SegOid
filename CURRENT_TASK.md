@@ -111,8 +111,8 @@ Implement cross-validation infrastructure: configurable split generation, traini
 ### 6. Run full CV experiment
 
 - [x] Integration test: 2-fold subset completed successfully (verified pipeline works end-to-end)
-- [ ] Execute full 6-fold LOO CV on current dataset (in progress - running in background)
-- [ ] Document results in Notes section
+- [x] Execute full 6-fold LOO CV on current dataset - COMPLETE
+- [x] Document results in Notes section
 
 ### 7. Unit tests
 
@@ -310,9 +310,28 @@ _Update during session:_
 - CV orchestration: 5 tests (config loading, fold config creation, result aggregation)
 - All 17 tests passing
 
-**Next Steps:**
-- Full 6-fold LOOCV CV execution (estimated ~4 hours, 50 epochs with early stopping)
-- Results will provide robust performance estimate with mean ± std across all 6 images 
+**Full 6-Fold LOOCV Results (2025-12-27):**
+- **Experiment ID:** cv_20251227_115256
+- **Performance:** Val Dice: **0.9168 ± 0.0231** (mean ± std)
+  - Min: 0.8856 (dECM_1_2)
+  - Max: 0.9434 (Matri_1_2)
+- **Per-fold results:**
+  - Fold 0 (Matri_1_1): Dice 0.9269, epoch 5, 7.5 min
+  - Fold 1 (Matri_1_2): Dice 0.9434, epoch 18, 14.9 min
+  - Fold 2 (dECM_1_1): Dice 0.9202, epoch 21, 33.0 min
+  - Fold 3 (dECM_1_2): Dice 0.8856, epoch 6, 30.1 min
+  - Fold 4 (dECM_2_1): Dice 0.8919, epoch 11, 33.6 min
+  - Fold 5 (dECM_2_2): Dice 0.9326, epoch 19, 15.4 min
+- **Total training time:** 134.5 minutes (2.24 hours)
+- **Early stopping:** Effective - epochs ranged from 5-21 (avg ~13 epochs)
+- **Key insights:**
+  - Excellent generalization: 91.7% Dice with only 2.3% variance
+  - Significant improvement over POC (0.799 → 0.917)
+  - Low variance indicates model is robust across different images
+  - dECM images showed slightly more variation than Matri images
+- **Report:** Full results in runs/cv_20251227_115256/results/REPORT.md
+
+**Phase 6 Status:** ✅ COMPLETE - All tasks finished, CV demonstrates production-ready performance 
 
 ---
 
