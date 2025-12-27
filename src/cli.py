@@ -938,3 +938,55 @@ def run_cv():
     except Exception as e:
         logging.error(f"Cross-validation failed: {e}", exc_info=True)
         return 1
+
+
+def review_predictions():
+    """Interactive review tool for segmentation predictions."""
+    parser = argparse.ArgumentParser(
+        description="Interactive slideshow for reviewing predicted masks with flagging capability"
+    )
+    parser.add_argument(
+        "--image-dir",
+        required=True,
+        help="Directory containing original images (e.g., data/working/images)",
+    )
+    parser.add_argument(
+        "--pred-mask-dir",
+        required=True,
+        help="Directory containing predicted masks (e.g., inference/full_dataset_review)",
+    )
+    parser.add_argument(
+        "--display-duration",
+        type=float,
+        default=3.0,
+        help="Duration in seconds to display each view (default: 3.0)",
+    )
+    parser.add_argument(
+        "--overlay-alpha",
+        type=float,
+        default=0.5,
+        help="Transparency of mask overlay, 0.0-1.0 (default: 0.5)",
+    )
+    parser.add_argument(
+        "--output-flagged",
+        help="Path to save flagged images list (optional)",
+    )
+    args = parser.parse_args()
+
+    try:
+        from src.visualization.review import run_review
+
+        # Run review
+        flagged = run_review(
+            image_dir=args.image_dir,
+            pred_mask_dir=args.pred_mask_dir,
+            display_duration=args.display_duration,
+            overlay_alpha=args.overlay_alpha,
+            output_flagged=args.output_flagged,
+        )
+
+        return 0
+
+    except Exception as e:
+        logging.error(f"Review failed: {e}", exc_info=True)
+        return 1

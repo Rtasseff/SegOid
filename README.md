@@ -238,6 +238,76 @@ metrics/
 - Histogram of circularity
 - Scatter plot: predicted vs ground truth object count
 
+### Interactive Prediction Review
+
+Review segmentation predictions with an interactive slideshow that overlays masks on original images:
+
+```bash
+review_predictions --image-dir data/working/images \
+                   --pred-mask-dir inference/full_dataset_review \
+                   --display-duration 3.0
+```
+
+**Parameters:**
+- `--image-dir` (required): Directory containing original images
+- `--pred-mask-dir` (required): Directory containing predicted masks (*_pred_mask.tif)
+- `--display-duration`: Seconds to display each view (default: 3.0)
+- `--overlay-alpha`: Transparency of mask overlay, 0.0-1.0 (default: 0.5)
+- `--output-flagged`: Path to save flagged images list (optional)
+
+**Features:**
+- **Automatic slideshow:** Cycles through all images showing original then overlay
+- **Interactive flagging:** Left-click to flag/unflag images needing review
+- **Pause/resume:** Press SPACE to pause, ESC to exit
+- **Green overlay:** Predicted masks shown as semi-transparent green on grayscale images
+- **Flagged list:** Optionally save flagged images to text file for follow-up
+
+**Controls:**
+- **LEFT CLICK:** Flag/unflag current image for review
+- **SPACE:** Pause/resume slideshow
+- **ESC:** Exit review
+
+**Use Cases:**
+- Quick visual inspection of prediction quality across dataset
+- Identify problematic images for annotation refinement
+- Flag images for closer examination or re-labeling
+- Quality control for batch inference results
+
+**Example with flagging:**
+
+```bash
+# Review predictions and save flagged list
+review_predictions --image-dir data/working/images \
+                   --pred-mask-dir inference/test_predictions \
+                   --display-duration 2.5 \
+                   --output-flagged flagged_for_review.txt
+
+# Later, process only flagged images
+cat flagged_for_review.txt
+# Matri_1_1
+# dECM_2_2
+```
+
+**Programmatic Usage:**
+
+The review tool can also be used in scripts:
+
+```python
+from src.visualization.review import run_review
+
+# Run review and get flagged images
+flagged = run_review(
+    image_dir="data/working/images",
+    pred_mask_dir="inference/test_predictions",
+    display_duration=3.0,
+    output_flagged="flagged.txt"
+)
+
+if flagged:
+    print(f"Need to review: {flagged}")
+    # Process flagged images further...
+```
+
 ### Phase 6: Cross-Validation
 
 Run leave-one-out cross-validation to get robust performance estimates:
