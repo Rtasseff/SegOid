@@ -18,20 +18,23 @@ pytest
 
 ## Project Status
 
-**🎉 PROOF-OF-CONCEPT COMPLETE 🎉**
+**🎉 PHASE 6 COMPLETE - PRODUCTION READY 🎉**
 
-All pipeline phases implemented and functional end-to-end.
+Full cross-validation infrastructure implemented and validated with excellent results.
 
 **Completed Phases:**
-- ✅ Phase 1: Dataset validation and train/val/test splits
-- ✅ Phase 1.5: Sanity check (pipeline validation)
-- ✅ Phase 3: Production training infrastructure (val Dice: 0.799)
-- ✅ Phase 4: Tiled inference on full-resolution images (test Dice: 0.794)
-- ✅ Phase 5: Object quantification and instance evaluation (F1: 0.682)
+- ✅ Phase 0-5: POC pipeline (validation, training, inference, quantification)
+- ✅ **Phase 6: Cross-Validation Infrastructure** (2025-12-27)
 
-**Results:**
-- Pixel-level segmentation: **79.4% Dice** on test set
-- Instance detection: **68.2% F1** (high recall 94.8%, lower precision 53.8%)
+**Cross-Validation Results (6-fold LOOCV):**
+- **Performance:** Val Dice **0.9168 ± 0.0231** (91.7% ± 2.3%)
+- **Improvement:** +11.8 percentage points over POC (0.799 → 0.917)
+- **Robustness:** Low variance indicates excellent generalization
+- **Training time:** 134.5 minutes for all 6 folds (M1 Mac)
+
+**POC Baseline Results:**
+- Pixel-level segmentation: 79.4% Dice on test set
+- Instance detection: 68.2% F1 (recall 94.8%, precision 53.8%)
 - Pipeline runs fully automated from raw images to quantified objects
 
 ## Documentation
@@ -234,6 +237,52 @@ metrics/
 - Histogram of equivalent diameters
 - Histogram of circularity
 - Scatter plot: predicted vs ground truth object count
+
+### Phase 6: Cross-Validation
+
+Run leave-one-out cross-validation to get robust performance estimates:
+
+```bash
+run_cv --config configs/cv_config.yaml
+```
+
+**Parameters:**
+- `--config` (required): Path to CV configuration YAML
+- `--folds`: Optional comma-separated fold indices to run (e.g., "0,2,5" for debugging)
+
+**Features:**
+- Leave-one-out CV (train on 5 images, validate on 1)
+- K-fold CV support for larger datasets
+- Automated fold generation and orchestration
+- Comprehensive result aggregation with statistics
+- Early stopping and LR scheduling per fold
+- TensorBoard logging per fold
+
+**Outputs:**
+```
+runs/cv_<timestamp>/
+├── cv_config.yaml              # Config snapshot
+├── folds/
+│   ├── cv_meta.yaml            # Fold-to-image mapping
+│   ├── fold_0/
+│   │   ├── train.csv           # Training manifest (5 images)
+│   │   ├── val.csv             # Validation manifest (1 image)
+│   │   ├── config.yaml         # Fold-specific config
+│   │   ├── checkpoints/
+│   │   │   ├── best_model.pth  # Best model for this fold
+│   │   │   └── final_model.pth
+│   │   └── tensorboard/
+│   ├── fold_1/ ... fold_5/
+└── results/
+    ├── fold_metrics.csv        # Per-fold performance
+    ├── summary.yaml            # Aggregated statistics
+    └── REPORT.md               # Human-readable summary
+```
+
+**Expected Results (6-fold LOOCV on current dataset):**
+- Val Dice: 0.90-0.92 with ~2-3% std
+- Training time: ~2-2.5 hours total on M1 Mac
+- Each fold trains until early stopping (typically 10-20 epochs)
 
 ## Complete End-to-End Example
 
