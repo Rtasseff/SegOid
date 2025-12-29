@@ -42,6 +42,37 @@ Full cross-validation infrastructure implemented and validated with excellent re
 - **[CLAUDE.md](CLAUDE.md)** - Operational guide for Claude Code
 - **[docs/SDD.md](docs/SDD.md)** - Complete Software Design Document with detailed specifications
 - **[CURRENT_TASK.md](CURRENT_TASK.md)** - Current task context and session notes
+- **[PRODUCTION_QUICK_START.md](PRODUCTION_QUICK_START.md)** - Quick reference for production model training
+- **[docs/PRODUCTION_MODEL.md](docs/PRODUCTION_MODEL.md)** - Detailed guide for production deployment
+
+## Production Model Training (Data Flywheel)
+
+Train on ALL 6 labeled images for maximum data utilization:
+
+```bash
+# Train production model
+train --config configs/production_train.yaml
+
+# Run inference on unlabeled images
+predict_full --checkpoint runs/train_YYYYMMDD_HHMMSS/checkpoints/best_model.pth \
+             --manifest unlabeled_images.csv \
+             --output-dir inference/production/
+
+# Review and flag for correction
+review_predictions --image-dir path/to/images \
+                   --pred-mask-dir inference/production/ \
+                   --output-flagged needs_correction.txt
+
+# After manual correction, add to training data and retrain
+cp corrected/*.tif data/working/images/
+cp corrected/*_mask.tif data/working/masks/
+validate_dataset --input-dir data/working/ --output-dir data/splits/
+train --config configs/production_train.yaml
+```
+
+**Data Flywheel:** TRAIN → INFER → REVIEW → CORRECT → RETRAIN
+
+See [PRODUCTION_QUICK_START.md](PRODUCTION_QUICK_START.md) for detailed workflow.
 
 ## Pipeline Workflow
 
