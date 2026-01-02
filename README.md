@@ -1,506 +1,531 @@
-# SegOid - Spheroid Segmentation Pipeline
+# SegOid — Spheroid Segmentation Pipeline
 
-A reproducible, researcher-friendly pipeline for training semantic segmentation models to identify spheroids in microscopy images using PyTorch U-Net.
+A PyTorch-based semantic segmentation pipeline for identifying spheroids in microscopy images. Trained on well-plate images, outputs binary masks and morphology metrics.
 
-## Quick Start
+## Overview
+
+SegOid uses a U-Net architecture with a ResNet18 encoder to segment spheroids from microscopy images. The pipeline:
+
+1. Takes full-resolution microscopy images as input
+2. Applies tiled inference (256×256 patches with 25% overlap)
+3. Outputs binary segmentation masks
+4. Optionally computes morphology metrics (area, diameter, circularity)
+
+**Production Model Performance:**
+
+| Metric | Value |
+|--------|-------|
+| Training | 6 labeled images, 100 epochs |
+| Validation Dice | 0.91+ |
+| Cross-validation (6-fold LOOCV) | 0.917 ± 0.023 |
+
+---
+
+## Installation
+
+**Requirements:**
+- Python 3.11+
+- ~4GB disk space for dependencies
+- Mac M1/M2 or Linux with NVIDIA GPU recommended
 
 ```bash
-# Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # macOS/Linux
+# Clone repository
+git clone <repository>
+cd segoid
 
-# Install in development mode
-pip install -e ".[dev]"
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate
+
+# Install package
+pip install -e .
 
 # Verify installation
 pytest
 ```
 
-## Project Status
+**Key Dependencies:**
+- PyTorch
+- segmentation-models-pytorch
+- albumentations
+- tifffile, imagecodecs
+- scikit-image, scipy, pandas
 
-**🎉 PHASE 6 COMPLETE - PRODUCTION READY 🎉**
+---
 
-Full cross-validation infrastructure implemented and validated with excellent results.
+## Running Inference
 
-**Completed Phases:**
-- ✅ Phase 0-5: POC pipeline (validation, training, inference, quantification)
-- ✅ **Phase 6: Cross-Validation Infrastructure** (2025-12-27)
+### Step 1: Prepare Your Images
 
-**Cross-Validation Results (6-fold LOOCV):**
-- **Performance:** Val Dice **0.9168 ± 0.0231** (91.7% ± 2.3%)
-- **Improvement:** +11.8 percentage points over POC (0.799 → 0.917)
-- **Robustness:** Low variance indicates excellent generalization
-- **Training time:** 134.5 minutes for all 6 folds (M1 Mac)
+Create a manifest CSV listing your images (e.g., `my_images.csv`):
 
-**POC Baseline Results:**
-- Pixel-level segmentation: 79.4% Dice on test set
-- Instance detection: 68.2% F1 (recall 94.8%, precision 53.8%)
-- Pipeline runs fully automated from raw images to quantified objects
+```csv
+basename,image_path,mask_path
+sample_001,path/to/sample_001.tif,
+sample_002,path/to/sample_002.tif,
+sample_003,path/to/sample_003.tif,
+```
 
-## Documentation
+Notes:
+- `mask_path` is empty for unlabeled images
+- Paths can be relative to `--data-root` or absolute
+- Images should be TIFF format (RGB or grayscale)
 
-- **[CLAUDE.md](CLAUDE.md)** - Operational guide for Claude Code
-- **[docs/SDD.md](docs/SDD.md)** - Complete Software Design Document with detailed specifications
-- **[CURRENT_TASK.md](CURRENT_TASK.md)** - Current task context and session notes
-- **[PRODUCTION_QUICK_START.md](PRODUCTION_QUICK_START.md)** - Quick reference for production model training
-- **[docs/PRODUCTION_MODEL.md](docs/PRODUCTION_MODEL.md)** - Detailed guide for production deployment
-
-## Production Model Training (Data Flywheel)
-
-Train on ALL 6 labeled images for maximum data utilization:
+**Quick manifest generation from a directory:**
 
 ```bash
-# Train production model
-train --config configs/production_train.yaml
+python -c "
+from pathlib import Path
 
-# Run inference on unlabeled images
-predict_full --checkpoint runs/train_YYYYMMDD_HHMMSS/checkpoints/best_model.pth \
-             --manifest unlabeled_images.csv \
-             --output-dir inference/production/
+image_dir = 'path/to/your/images'
+output_csv = 'my_images.csv'
 
-# Review and flag for correction
-review_predictions --image-dir path/to/images \
-                   --pred-mask-dir inference/production/ \
-                   --output-flagged needs_correction.txt
+with open(output_csv, 'w') as f:
+    f.write('basename,image_path,mask_path\n')
+    for img in Path(image_dir).glob('*.tif'):
+        if '_mask' not in img.stem:
+            f.write(f'{img.stem},{img},\n')
+print(f'Created {output_csv}')
+"
+```
 
-# After manual correction, add to training data and retrain
-cp corrected/*.tif data/working/images/
-cp corrected/*_mask.tif data/working/masks/
+### Step 2: Run Prediction
+
+```bash
+source .venv/bin/activate
+
+predict_full \
+    --checkpoint runs/train_20251229_194116/checkpoints/best_model.pth \
+    --manifest my_images.csv \
+    --output-dir inference/my_batch/ \
+    --data-root .
+```
+
+**Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--checkpoint` | (required) | Path to model checkpoint |
+| `--manifest` | (required) | CSV listing images to process |
+| `--output-dir` | `inference/` | Where to save predictions |
+| `--data-root` | `data/` | Root for relative paths in manifest |
+| `--tile-size` | 256 | Tile size for inference (must match training) |
+| `--overlap` | 0.25 | Tile overlap fraction (0.25 = 25%) |
+| `--threshold` | 0.5 | Probability threshold for binary mask |
+| `--min-object-area` | 100 | Remove objects smaller than this (px²) |
+
+**Output:**
+
+```
+inference/my_batch/
+├── sample_001_pred_mask.tif    # Binary mask (0/255)
+├── sample_001_pred_prob.tif    # Probability map (float32)
+├── sample_002_pred_mask.tif
+├── sample_002_pred_prob.tif
+├── ...
+└── pixel_metrics.csv           # Dice/IoU if ground truth available
+```
+
+**Adjusting Threshold:**
+
+```bash
+# More sensitive (catches more, but more false positives)
+predict_full ... --threshold 0.3
+
+# More conservative (fewer false positives, may miss faint spheroids)
+predict_full ... --threshold 0.7
+```
+
+### Step 3: Interactive Prediction Review
+
+Review predictions visually and flag those needing correction:
+
+```bash
+review_predictions \
+    --image-dir path/to/your/images/ \
+    --pred-mask-dir inference/my_batch/ \
+    --output-flagged flagged_images.txt
+```
+
+**Controls:**
+
+| Key | Action |
+|-----|--------|
+| **LEFT CLICK** | Flag/unflag current image |
+| **SPACE** | Pause/resume slideshow |
+| **LEFT ARROW** | Previous image |
+| **RIGHT ARROW** | Next image |
+| **ESC** | Exit and save flagged list |
+
+**Display Cycle:**
+1. Original image (3 seconds)
+2. Predicted mask overlay (3 seconds)
+3. Next image...
+
+**Output:**
+
+`flagged_images.txt` contains one filename per line:
+```
+sample_003.tif
+sample_007.tif
+sample_012.tif
+```
+
+### Step 4: Compute Morphology Metrics (Optional)
+
+Extract quantitative measurements from segmented spheroids:
+
+```bash
+quantify_objects \
+    --pred-mask-dir inference/my_batch/ \
+    --gt-manifest my_images.csv \
+    --output-dir metrics/my_batch/
+```
+
+**Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--pred-mask-dir` | (required) | Directory with predicted masks |
+| `--gt-manifest` | (required) | Manifest CSV (for image paths) |
+| `--output-dir` | `metrics/` | Where to save results |
+| `--min-object-area` | 100 | Minimum object size (px²) |
+| `--iou-threshold` | 0.5 | IoU threshold for instance matching |
+| `--pixel-size` | None | µm per pixel (for physical units) |
+
+**Output:**
+
+```
+metrics/my_batch/
+├── per_image/
+│   ├── sample_001_objects.csv    # Per-object measurements
+│   └── sample_002_objects.csv
+├── all_objects.csv               # Combined object table
+├── instance_eval.csv             # Detection metrics (if GT available)
+└── summary.csv                   # Dataset statistics
+```
+
+**Morphology Metrics Per Object:**
+
+| Metric | Description |
+|--------|-------------|
+| `area` | Object area in pixels |
+| `perimeter` | Boundary length |
+| `equivalent_diameter` | Diameter of equal-area circle |
+| `major_axis_length` | Major axis of fitted ellipse |
+| `minor_axis_length` | Minor axis of fitted ellipse |
+| `eccentricity` | Ellipse eccentricity (0=circle, 1=line) |
+| `circularity` | 4πA/P² (1=perfect circle) |
+| `centroid_x`, `centroid_y` | Object center coordinates |
+
+---
+
+## Complete Example Workflow
+
+```bash
+# 1. Activate environment
+source .venv/bin/activate
+
+# 2. Create manifest for new images
+cat > batch_001.csv << EOF
+basename,image_path,mask_path
+img_001,/data/new_experiment/img_001.tif,
+img_002,/data/new_experiment/img_002.tif,
+img_003,/data/new_experiment/img_003.tif,
+EOF
+
+# 3. Run inference
+predict_full \
+    --checkpoint runs/train_20251229_194116/checkpoints/best_model.pth \
+    --manifest batch_001.csv \
+    --output-dir inference/batch_001/ \
+    --data-root /
+
+# 4. Review predictions interactively
+review_predictions \
+    --image-dir /data/new_experiment/ \
+    --pred-mask-dir inference/batch_001/ \
+    --output-flagged batch_001_flagged.txt
+
+# 5. Check which images were flagged
+cat batch_001_flagged.txt
+
+# 6. Compute morphology metrics
+quantify_objects \
+    --pred-mask-dir inference/batch_001/ \
+    --gt-manifest batch_001.csv \
+    --output-dir metrics/batch_001/
+```
+
+---
+
+## Correcting Predictions and Retraining
+
+If predictions need correction, you can fix them and retrain with expanded data.
+
+### 1. Correct Flagged Predictions
+
+Open flagged images in annotation software (e.g., Fiji/ImageJ):
+- Load original image
+- Load predicted mask as overlay
+- Edit mask using ROI tools
+- Save corrected mask as `<basename>_mask.tif`
+
+### 2. Add Corrected Data to Training Set
+
+```bash
+# Copy corrected images and masks
+cp corrected_images/*.tif data/working/images/
+cp corrected_images/*_mask.tif data/working/masks/
+
+# Update dataset manifest
 validate_dataset --input-dir data/working/ --output-dir data/splits/
+```
+
+### 3. Retrain Model
+
+```bash
 train --config configs/production_train.yaml
 ```
 
-**Data Flywheel:** TRAIN → INFER → REVIEW → CORRECT → RETRAIN
+New model saved to: `runs/train_<timestamp>/checkpoints/best_model.pth`
 
-See [PRODUCTION_QUICK_START.md](PRODUCTION_QUICK_START.md) for detailed workflow.
+### Data Flywheel
 
-## Pipeline Workflow
+Each iteration improves the model:
 
-### Phase 1: Dataset Preparation
+```
+TRAIN → INFER → REVIEW → CORRECT → RETRAIN
+  ↑                                    ↓
+  └────────────────────────────────────┘
+```
 
-**1.1. Validate Dataset**
+- Start: 6 images → Model Dice 0.91
+- After corrections: 10+ images → Improved performance
+- Repeat until predictions need minimal correction
 
-Validate image/mask pairing and compute quality metrics:
+---
+
+## Training Commands
+
+### Validate Dataset
+
+Check image/mask pairing and compute statistics:
 
 ```bash
-validate_dataset --input-dir data/working/ --output-dir data/splits/
+validate_dataset \
+    --input-dir data/working/ \
+    --output-dir data/splits/
 ```
 
-This generates:
-- `data/splits/all.csv` - Complete manifest with QC metrics
-- `data/splits/qc_summary.csv` - Quality control summary
-
-**1.2. Create Train/Val/Test Splits**
-
-Generate stratified splits by mask coverage:
+### Create Train/Val/Test Splits
 
 ```bash
-make_splits --manifest data/splits/all.csv \
-            --seed 42 \
-            --output-dir data/splits/ \
-            --train-ratio 0.6 \
-            --val-ratio 0.2 \
-            --test-ratio 0.2
+make_splits \
+    --manifest data/splits/all.csv \
+    --seed 42 \
+    --output-dir data/splits/
 ```
 
-This generates:
-- `data/splits/train.csv` - Training set manifest
-- `data/splits/val.csv` - Validation set manifest
-- `data/splits/test.csv` - Test set manifest
-
-### Phase 1.5: Sanity Check
-
-Validate the pipeline with minimal training (5 epochs):
+### Train Model
 
 ```bash
-sanity_check --config configs/sanity_check.yaml
+train --config configs/production_train.yaml
 ```
 
-This runs a quick training loop to verify:
-- Data loading works correctly
-- Model trains (loss decreases)
-- Predictions are spatially coherent
-- No systematic offset between predictions and ground truth
+**Parameters (via config file):**
 
-Output directory: `runs/sanity_check/`
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `epochs` | 100 | Training epochs |
+| `batch_size` | 4 | Batch size |
+| `learning_rate` | 1e-4 | Initial learning rate |
+| `patch_size` | 256 | Training patch size |
+| `patches_per_image` | 30 | Patches sampled per image per epoch |
+| `early_stopping.enabled` | false | Stop early if no improvement |
 
-**Optional CLI overrides:**
+### Monitor Training
 
 ```bash
-sanity_check --config configs/sanity_check.yaml \
-             --epochs 3 \
-             --patches-per-image 5 \
-             --batch-size 2
-```
-
-### Phase 3: Full Model Training
-
-Train the production model with checkpointing, early stopping, and TensorBoard:
-
-```bash
-train --config configs/train.yaml
-```
-
-**Features:**
-- **Config-driven:** All parameters in `configs/train.yaml`
-- **Checkpointing:** Best model (by val Dice), periodic checkpoints (every 10 epochs), final model
-- **Early stopping:** Stops if val Dice doesn't improve for 10 epochs
-- **LR scheduling:** ReduceLROnPlateau (reduces LR by 0.5 if val loss plateaus)
-- **TensorBoard logging:** Metrics + sample prediction visualizations
-- **Resume support:** Continue from checkpoint with `--resume`
-
-**Training outputs:**
-
-```
-runs/train_<timestamp>/
-├── config.yaml              # Config snapshot for reproducibility
-├── checkpoints/
-│   ├── best_model.pth       # Best model by validation Dice
-│   ├── checkpoint_epoch_010.pth
-│   ├── checkpoint_epoch_020.pth
-│   └── final_model.pth      # Final model after training
-└── tensorboard/             # TensorBoard logs
-```
-
-**Monitor training with TensorBoard:**
-
-```bash
-# In a separate terminal
-tensorboard --logdir runs/train_<timestamp>/tensorboard
+tensorboard --logdir runs/
 # Open http://localhost:6006
 ```
 
-**Resume training from checkpoint:**
+### Cross-Validation
 
-```bash
-train --config configs/train.yaml \
-      --resume runs/train_<timestamp>/checkpoints/checkpoint_epoch_020.pth
-```
-
-**Expected training behavior:**
-- Epochs: 50 (or until early stopping)
-- Training time: ~30-40 minutes on M1 Mac, faster on GPU
-- Target validation Dice: 0.75-0.90
-- Early stopping typically triggers around epoch 25-35
-
-### Phase 4: Tiled Inference
-
-Apply trained model to full-resolution images using sliding window approach:
-
-```bash
-predict_full --checkpoint runs/train_<timestamp>/checkpoints/best_model.pth \
-             --manifest data/splits/test.csv \
-             --output-dir inference/test_predictions/
-```
-
-**Parameters:**
-- `--checkpoint` (required): Path to trained model checkpoint
-- `--manifest` (required): CSV manifest with image/mask paths
-- `--output-dir`: Output directory for predictions (default: `inference/`)
-- `--tile-size`: Tile size for sliding window (default: 256)
-- `--overlap`: Overlap fraction between tiles (default: 0.25)
-- `--threshold`: Probability threshold for binarization (default: 0.5)
-- `--min-object-area`: Minimum object area for post-processing (default: 100 px)
-- `--data-root`: Root directory for relative paths (default: `data/`)
-
-**Outputs:**
-```
-inference/test_predictions/
-├── <image>_pred_mask.tif   # Binary mask (0/255)
-├── <image>_pred_prob.tif   # Probability map (float32)
-└── pixel_metrics.csv       # Per-image Dice/IoU scores
-```
-
-**Features:**
-- Sliding window with configurable overlap for smooth predictions
-- Post-processing: small object removal, hole filling
-- Pixel-level evaluation when ground truth available
-
-### Phase 5: Object Quantification
-
-Extract individual spheroids, match to ground truth, and compute morphology metrics:
-
-```bash
-quantify_objects --pred-mask-dir inference/test_predictions/ \
-                 --gt-manifest data/splits/test.csv \
-                 --output-dir metrics/
-```
-
-**Parameters:**
-- `--pred-mask-dir` (required): Directory with predicted masks
-- `--gt-manifest` (required): Path to ground truth manifest CSV
-- `--output-dir`: Output directory (default: `metrics/`)
-- `--min-object-area`: Minimum object area in pixels (default: 100)
-- `--iou-threshold`: IoU threshold for valid match (default: 0.5)
-- `--pixel-size`: Pixel size in µm for physical units (optional)
-- `--data-root`: Root directory for relative paths (default: `data/`)
-
-**Outputs:**
-```
-metrics/
-├── all_objects.csv           # All detected objects with morphology
-├── instance_eval.csv         # Per-image instance metrics (TP/FP/FN)
-├── summary.csv               # Dataset-level summary statistics
-├── per_image/
-│   └── <image>_objects.csv   # Per-object morphology for each image
-└── plots/
-    └── summary_plots.png     # Visualization (4 plots)
-```
-
-**Morphology Metrics (per object):**
-- `object_id`: Unique identifier
-- `area`: Pixel count (or µm² if pixel_size provided)
-- `perimeter`: Boundary length
-- `equivalent_diameter`: Diameter of equal-area circle
-- `major_axis_length`, `minor_axis_length`: Fitted ellipse axes
-- `eccentricity`: 0=circle, 1=line
-- `circularity`: 4πA/P² (1=perfect circle)
-- `centroid_x`, `centroid_y`: Object center
-- `bbox_*`: Bounding box coordinates
-
-**Instance Metrics:**
-- True Positives (TP), False Positives (FP), False Negatives (FN)
-- Precision, Recall, F1 Score
-- Mean Matched IoU
-
-**Visualizations:**
-- Histogram of spheroid areas
-- Histogram of equivalent diameters
-- Histogram of circularity
-- Scatter plot: predicted vs ground truth object count
-
-### Interactive Prediction Review
-
-Review segmentation predictions with an interactive slideshow that overlays masks on original images:
-
-```bash
-review_predictions --image-dir data/working/images \
-                   --pred-mask-dir inference/full_dataset_review \
-                   --display-duration 3.0
-```
-
-**Parameters:**
-- `--image-dir` (required): Directory containing original images
-- `--pred-mask-dir` (required): Directory containing predicted masks (*_pred_mask.tif)
-- `--display-duration`: Seconds to display each view (default: 3.0)
-- `--overlay-alpha`: Transparency of mask overlay, 0.0-1.0 (default: 0.5)
-- `--output-flagged`: Path to save flagged images list (optional)
-
-**Features:**
-- **Automatic slideshow:** Cycles through all images showing original then overlay
-- **Interactive flagging:** Left-click to flag/unflag images needing review
-- **Pause/resume:** Press SPACE to pause, ESC to exit
-- **Green overlay:** Predicted masks shown as semi-transparent green on grayscale images
-- **Flagged list:** Optionally save flagged images to text file for follow-up
-
-**Controls:**
-- **LEFT CLICK:** Flag/unflag current image for review
-- **SPACE:** Pause/resume slideshow
-- **ESC:** Exit review
-
-**Use Cases:**
-- Quick visual inspection of prediction quality across dataset
-- Identify problematic images for annotation refinement
-- Flag images for closer examination or re-labeling
-- Quality control for batch inference results
-
-**Example with flagging:**
-
-```bash
-# Review predictions and save flagged list
-review_predictions --image-dir data/working/images \
-                   --pred-mask-dir inference/test_predictions \
-                   --display-duration 2.5 \
-                   --output-flagged flagged_for_review.txt
-
-# Later, process only flagged images
-cat flagged_for_review.txt
-# Matri_1_1
-# dECM_2_2
-```
-
-**Programmatic Usage:**
-
-The review tool can also be used in scripts:
-
-```python
-from src.visualization.review import run_review
-
-# Run review and get flagged images
-flagged = run_review(
-    image_dir="data/working/images",
-    pred_mask_dir="inference/test_predictions",
-    display_duration=3.0,
-    output_flagged="flagged.txt"
-)
-
-if flagged:
-    print(f"Need to review: {flagged}")
-    # Process flagged images further...
-```
-
-### Phase 6: Cross-Validation
-
-Run leave-one-out cross-validation to get robust performance estimates:
+Run leave-one-out cross-validation for performance estimation:
 
 ```bash
 run_cv --config configs/cv_config.yaml
 ```
 
-**Parameters:**
-- `--config` (required): Path to CV configuration YAML
-- `--folds`: Optional comma-separated fold indices to run (e.g., "0,2,5" for debugging)
+**Results location:** `runs/cv_<timestamp>/results/`
+- `fold_metrics.csv` — Per-fold performance
+- `summary.yaml` — Aggregated statistics
+- `REPORT.md` — Human-readable summary
 
-**Features:**
-- Leave-one-out CV (train on 5 images, validate on 1)
-- K-fold CV support for larger datasets
-- Automated fold generation and orchestration
-- Comprehensive result aggregation with statistics
-- Early stopping and LR scheduling per fold
-- TensorBoard logging per fold
+---
 
-**Outputs:**
-```
-runs/cv_<timestamp>/
-├── cv_config.yaml              # Config snapshot
-├── folds/
-│   ├── cv_meta.yaml            # Fold-to-image mapping
-│   ├── fold_0/
-│   │   ├── train.csv           # Training manifest (5 images)
-│   │   ├── val.csv             # Validation manifest (1 image)
-│   │   ├── config.yaml         # Fold-specific config
-│   │   ├── checkpoints/
-│   │   │   ├── best_model.pth  # Best model for this fold
-│   │   │   └── final_model.pth
-│   │   └── tensorboard/
-│   ├── fold_1/ ... fold_5/
-└── results/
-    ├── fold_metrics.csv        # Per-fold performance
-    ├── summary.yaml            # Aggregated statistics
-    └── REPORT.md               # Human-readable summary
-```
+## Model Performance Details
 
-**Expected Results (6-fold LOOCV on current dataset):**
-- Val Dice: 0.90-0.92 with ~2-3% std
-- Training time: ~2-2.5 hours total on M1 Mac
-- Each fold trains until early stopping (typically 10-20 epochs)
+### Cross-Validation Results (6-fold Leave-One-Out)
 
-## Complete End-to-End Example
+| Fold | Val Image | Best Val Dice | Best Epoch |
+|------|-----------|---------------|------------|
+| 0 | dECM_1_1 | ? | ? |
+| 1 | dECM_1_2 | ? | ? |
+| 2 | dECM_2_1 | ? | ? |
+| 3 | dECM_2_2 | ? | ? |
+| 4 | Matri_1_1 | ? | ? |
+| 5 | Matri_1_2 | ? | ? |
+| **Mean** | | **0.917 ± 0.023** | |
 
-Here's a complete workflow from raw data to quantified objects:
+**CV Run:** `runs/cv_20251228_*/`
+**CV Config:** `configs/cv_config.yaml`
 
-```bash
-# 1. Set up environment
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+### Production Model
 
-# 2. Validate dataset and create splits
-validate_dataset --input-dir data/working/ --output-dir data/splits/
-make_splits --manifest data/splits/all.csv --seed 42 --output-dir data/splits/
+| Property | Value |
+|----------|-------|
+| Checkpoint | `runs/train_20251229_194116/checkpoints/best_model.pth` |
+| Config | `configs/production_train.yaml` |
+| Training Data | All 6 labeled images |
+| Epochs | 100 |
+| Validation Dice | 0.91+ |
 
-# 3. Run sanity check (optional but recommended)
-sanity_check --config configs/sanity_check.yaml
+---
 
-# 4. Train full model
-train --config configs/train.yaml
-
-# 5. Monitor training (in separate terminal)
-tensorboard --logdir runs/
-
-# 6. Run inference on test set
-predict_full --checkpoint runs/train_YYYYMMDD_HHMMSS/checkpoints/best_model.pth \
-             --manifest data/splits/test.csv \
-             --output-dir inference/test_predictions/
-
-# 7. Quantify objects and generate metrics
-quantify_objects --pred-mask-dir inference/test_predictions/ \
-                 --gt-manifest data/splits/test.csv \
-                 --output-dir metrics/
-
-# 8. Review results
-cat metrics/summary.csv
-open metrics/plots/summary_plots.png  # macOS
-```
-
-**Expected timing (M1 Mac):**
-- Phase 1 (validation + splits): < 1 minute
-- Phase 1.5 (sanity check): 5-10 minutes
-- Phase 3 (full training): 30-40 minutes
-- Phase 4 (inference): < 1 minute
-- Phase 5 (quantification): < 1 minute
-
-**Total:** ~45 minutes from data to results
-
-## Configuration Files
-
-All pipeline stages use YAML configuration files in `configs/`:
-
-- **`dataset.yaml`** - Patch extraction and augmentation parameters
-- **`sanity_check.yaml`** - Sanity check configuration
-- **`train.yaml`** - Full training configuration
-
-Edit these files to customize behavior without changing code.
-
-## Testing
-
-Run the full test suite:
-
-```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=src tests/
-
-# Run specific test file
-pytest tests/test_training.py -v
-```
-
-Current test coverage: 73 tests across all modules (dataset, training, inference, quantification).
-
-## Directory Structure
+## Project Structure
 
 ```
 segoid/
-├── configs/              # YAML configuration files
 ├── data/
-│   ├── raw/              # Original exports (never edit)
 │   ├── working/
-│   │   ├── images/       # 8-bit TIFFs for ML
-│   │   └── masks/        # Binary masks (0/255)
-│   └── splits/           # CSV manifests (train/val/test)
-├── runs/                 # Training outputs (checkpoints, logs)
-├── inference/            # Prediction outputs (Phase 4)
-├── metrics/              # Analysis outputs (Phase 5)
-├── src/                  # Package code
-│   ├── data/             # Dataset and validation
-│   ├── training/         # Training infrastructure
-│   ├── inference/        # Tiled inference (Phase 4)
-│   └── analysis/         # Object quantification (Phase 5)
-├── tests/                # Unit tests
-└── docs/                 # Documentation
+│   │   ├── images/          # Training images (*.tif)
+│   │   └── masks/           # Binary masks (*_mask.tif)
+│   └── splits/              # CSV manifests
+├── runs/                    # Training outputs
+│   ├── train_20251229_*/    # Production model
+│   └── cv_20251228_*/       # Cross-validation results
+├── inference/               # Prediction outputs
+├── metrics/                 # Quantification outputs
+├── configs/                 # YAML configurations
+│   ├── production_train.yaml
+│   ├── train.yaml
+│   └── cv_config.yaml
+├── src/                     # Source code
+│   ├── data/                # Dataset, validation
+│   ├── training/            # Training, cross-validation
+│   ├── inference/           # Prediction
+│   └── analysis/            # Quantification
+├── tests/                   # Unit tests
+└── docs/                    # Additional documentation
 ```
 
-## Tech Stack
+---
 
-- **PyTorch** - Deep learning framework
-- **segmentation_models_pytorch** - U-Net architecture with ResNet18 encoder
-- **albumentations** - Data augmentation
-- **TensorBoard** - Training visualization
-- **tifffile** + **imagecodecs** - TIFF I/O with LZW compression
-- **scikit-image** - Image processing and morphology analysis
-- **scipy** - Hungarian algorithm for instance matching
-- **matplotlib** - Visualization and plotting
-- **pandas** - Data management
-- **pytest** - Testing
+## Data Format
 
-## Platform Notes
+### Images
+- **Format:** TIFF (LZW compression supported)
+- **Color:** RGB (converted to grayscale internally) or grayscale
+- **Resolution:** Any (tiled inference handles large images)
 
-- **Mac M1/M2:** Development and testing on MPS (Metal Performance Shaders)
-- **Linux GPU:** Full training on CUDA-enabled GPUs (recommended for production)
-- **CPU:** Supported but ~10-20× slower than GPU
+### Masks
+- **Format:** TIFF
+- **Values:** Binary (0 = background, 255 = spheroid)
+- **Naming:** `<basename>_mask.tif` for image `<basename>.tif`
+- **Dimensions:** Must match corresponding image
+
+### Manifest CSV
+
+```csv
+basename,image_path,mask_path,mask_coverage,object_count,empty_confirmed
+image_001,working/images/image_001.tif,working/masks/image_001_mask.tif,0.042,12,
+image_002,working/images/image_002.tif,working/masks/image_002_mask.tif,0.038,10,
+unlabeled_001,path/to/unlabeled_001.tif,,,
+```
+
+| Column | Required | Description |
+|--------|----------|-------------|
+| `basename` | Yes | Unique identifier (filename without extension) |
+| `image_path` | Yes | Path to image file |
+| `mask_path` | No | Path to mask (empty for unlabeled) |
+| `mask_coverage` | No | Fraction of foreground pixels |
+| `object_count` | No | Number of objects in mask |
+| `empty_confirmed` | No | True if image confirmed to have no objects |
+
+---
+
+## Troubleshooting
+
+### Installation Issues
+
+**"No module named 'src'"**
+```bash
+pip install -e .
+```
+
+**Missing imagecodecs**
+```bash
+pip install imagecodecs
+```
+
+### Inference Issues
+
+**Out of memory**
+- Reduce `--tile-size` (try 128)
+- Process fewer images at once
+
+**Predictions look wrong**
+1. Check image format matches training data (TIFF, similar resolution)
+2. Try different threshold values (0.3–0.7)
+3. View probability maps (`*_pred_prob.tif`) to see model confidence
+4. Verify images are similar to training data (well-plate spheroids)
+
+**Slow inference**
+- CPU inference is usually fast enough
+- For GPU: ensure CUDA is properly installed
+
+### Training Issues
+
+**TensorBoard not showing data**
+```bash
+tensorboard --logdir runs/ --reload_multifile=true
+```
+
+**Training loss not decreasing**
+- Check data paths in config
+- Verify masks are binary (0/255)
+- Try lower learning rate
+
+### Review Interface Issues
+
+**Window not appearing**
+- Ensure display is connected
+- Check for error messages in terminal
+
+---
+
+## Command Reference
+
+| Command | Purpose |
+|---------|---------|
+| `predict_full` | Run inference on images |
+| `review_predictions` | Interactive prediction review |
+| `quantify_objects` | Compute morphology metrics |
+| `validate_dataset` | Check dataset integrity |
+| `make_splits` | Create train/val/test splits |
+| `train` | Train segmentation model |
+| `run_cv` | Run cross-validation |
+| `sanity_check` | Quick pipeline validation |
+
+---
 
 ## License
 
-MIT License - see [LICENSE](LICENSE)
+[Your license here]
+
+## Citation
+
+[Citation information if applicable]

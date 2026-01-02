@@ -1,105 +1,64 @@
 # CLAUDE.md
 
-Operational guide for Claude Code working in this repository.
+## Project
 
-## Quick Start
+**SegOid** — Spheroid segmentation pipeline. Production-ready tool for microscopy image analysis.
 
-1. Read `README.md` for project overview
-2. Check current phase below
-3. Read relevant task/plan file if doing development work
+## Documentation
 
-## Project Status
+**See `README.md`** for complete documentation including:
+- Installation
+- Running inference
+- Interactive prediction review
+- Morphology metrics
+- Retraining workflow
+- All command parameters
+- Troubleshooting
 
-**SegOid** — PyTorch U-Net pipeline for spheroid segmentation in microscopy images.
+## Typical Usage
 
-**POC (Phases 0-5):** ✅ Complete  
-**Data Flywheel (Phases 6-10):** 🔄 In progress
-
-| Phase | Status | Description |
-|-------|--------|-------------|
-| 0-5 | ✅ Done | POC pipeline (see `docs/SDD.md`) |
-| 6 | 🔄 Active | Cross-validation infrastructure |
-| 7 | ⏳ Next | Batch inference pipeline |
-| 8 | ⏳ Planned | Visual review interface |
-| 9 | ⏳ Planned | Annotation workflow |
-| 10 | ⏳ Planned | Iteration & retraining |
-
-## Key Documents
-
-| Document | Purpose | When to read |
-|----------|---------|--------------|
-| `README.md` | Project overview, setup, usage | First time, onboarding |
-| `docs/SDD.md` | POC design (Phases 0-5) | Reference only, do not reimplement |
-| `FLYWHEEL_MASTER_PLAN.md` | Phases 6-10 roadmap | Planning new features |
-| `AUTONOMOUS_SESSION.md` | Unattended execution instructions | Only for autonomous runs |
-
-## Commands
+Run the production model on new images:
 
 ```bash
-# Environment
 source .venv/bin/activate
-pip install -e .
 
-# Testing
-pytest
-pytest --cov=src tests/
+# Run inference
+predict_full \
+    --checkpoint runs/train_20251229_194116/checkpoints/best_model.pth \
+    --manifest <your_images.csv> \
+    --output-dir inference/<batch_name>/
 
-# POC Pipeline
+# Review predictions
+review_predictions \
+    --image-dir <path/to/images/> \
+    --pred-mask-dir inference/<batch_name>/ \
+    --output-flagged flagged.txt
+```
+
+## Quick Command Reference
+
+```bash
+# Inference
+predict_full --checkpoint <model.pth> --manifest <images.csv> --output-dir <output/>
+review_predictions --image-dir <images/> --pred-mask-dir <preds/> --output-flagged <flagged.txt>
+quantify_objects --pred-mask-dir <preds/> --gt-manifest <manifest.csv> --output-dir <metrics/>
+
+# Training (if retraining)
 validate_dataset --input-dir data/working/ --output-dir data/splits/
-make_splits --manifest data/splits/all.csv --seed 42 --output-dir data/splits/
-train --config configs/train.yaml
-predict_full --checkpoint runs/<run_id>/checkpoints/best_model.pth --manifest data/splits/test.csv
-quantify_objects --pred-mask-dir inference/test_predictions/ --gt-manifest data/splits/test.csv
-
-# Interactive Review
-review_predictions --image-dir data/working/images --pred-mask-dir inference/full_dataset_review
-
-# Cross-validation (Phase 6)
-run_cv --config configs/cv_config.yaml
-
-# TensorBoard
-tensorboard --logdir runs/
+train --config configs/production_train.yaml
 ```
 
-## Directory Structure
+## Key Paths
 
-```
-segoid/
-  data/
-    working/images/, masks/    # Training data (6 labeled images)
-    splits/                    # CSV manifests
-  runs/                        # Training outputs, CV experiments
-  inference/                   # Predictions  
-  metrics/                     # Analysis outputs
-  src/                         # Package code
-  configs/                     # YAML configs
-  docs/                        # SDD.md, other documentation
-```
+| Path | Description |
+|------|-------------|
+| `runs/train_20251229_194116/checkpoints/best_model.pth` | Production model |
+| `configs/production_train.yaml` | Training config |
+| `data/working/images/`, `masks/` | Training data |
+| `data/splits/all.csv` | Dataset manifest |
 
-## Critical Conventions
+## Conventions
 
-- **File naming:** Image `X.tif` → Mask `X_mask.tif`
-- **Image format:** RGB images (convert to grayscale), grayscale masks, LZW compression
-- **Splits:** Always by image, never by patch
-- **Masks:** Binary 0/255
-- **Patch size:** 256 pixels
-- **Commits:** Small, focused, with clear messages
-
-## Tech Stack
-
-Python 3.11+, PyTorch, segmentation-models-pytorch, albumentations, tifffile, imagecodecs, scikit-image, scipy, pandas, PyYAML, TensorBoard
-
-## Code Style
-
-- Type hints on public functions
-- Docstrings for modules and classes
-- Use `logging` module, not print statements
-- Config via YAML files in `configs/`
-- Match existing patterns in `src/`
-
-## POC Results (Reference)
-
-- Val Dice: 0.799
-- Test Dice: 0.794
-- Model: U-Net with ResNet18 encoder
-- Training: 34 epochs (early stopping), ~37 min on M1
+- **Images:** TIFF, RGB or grayscale
+- **Masks:** Binary 0/255, named `<basename>_mask.tif`
+- **Manifests:** CSV with `basename,image_path,mask_path`
