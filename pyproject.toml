@@ -47,6 +47,7 @@ sanity_check = "src.cli:sanity_check"
 train = "src.cli:train"
 predict_full = "src.cli:predict_full"
 quantify_objects = "src.cli:quantify_objects"
+extract_metrics = "src.cli:extract_metrics"
 run_cv = "src.cli:run_cv"
 review_predictions = "src.cli:review_predictions"
 

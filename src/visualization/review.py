@@ -297,6 +297,202 @@ class InteractiveReview:
         return self.flagged_images
 
 
+def export_review_video(
+    image_dir: str,
+    pred_mask_dir: str,
+    output_video: str,
+    frame_duration: float = 3.0,
+    overlay_alpha: float = 0.5,
+    fps: int = 30,
+) -> int:
+    """
+    Export a video showing predictions overlaid on images for review.
+
+    This is useful for WSL/headless environments where interactive display
+    doesn't work. Creates an MP4 video you can watch in Windows.
+
+    Parameters
+    ----------
+    image_dir : str
+        Directory containing original images
+    pred_mask_dir : str
+        Directory containing predicted masks (*_pred_mask.tif)
+    output_video : str
+        Path to output video file (e.g., 'review.mp4')
+    frame_duration : float, optional
+        Duration in seconds to show each image (default: 3.0)
+    overlay_alpha : float, optional
+        Transparency of mask overlay (0.0-1.0, default: 0.5)
+    fps : int, optional
+        Video frames per second (default: 30)
+
+    Returns
+    -------
+    int
+        Number of images processed
+    """
+    import cv2
+
+    image_dir = Path(image_dir)
+    pred_mask_dir = Path(pred_mask_dir)
+    output_path = Path(output_video)
+
+    # Find all image/mask pairs
+    pairs = []
+    for image_path in sorted(image_dir.glob("*.tif")):
+        basename = image_path.stem
+        pred_mask_path = pred_mask_dir / f"{basename}_pred_mask.tif"
+
+        if pred_mask_path.exists():
+            pairs.append((basename, image_path, pred_mask_path))
+        else:
+            logger.warning(f"No predicted mask found for {basename}, skipping")
+
+    if len(pairs) == 0:
+        logger.error("No image/mask pairs found")
+        return 0
+
+    logger.info(f"Creating review video with {len(pairs)} images")
+    print(f"\nCreating review video...")
+    print(f"  Images: {len(pairs)}")
+    print(f"  Frame duration: {frame_duration}s")
+    print(f"  Output: {output_path}")
+
+    # Determine maximum dimensions across all images
+    print("  Scanning image dimensions...")
+    max_height = 0
+    max_width = 0
+    for _, image_path, _ in pairs:
+        img = tifffile.imread(image_path)
+        if img.ndim == 3:
+            h, w = img.shape[:2]
+        else:
+            h, w = img.shape
+        max_height = max(max_height, h)
+        max_width = max(max_width, w)
+
+    print(f"  Video dimensions: {max_width} x {max_height}")
+
+    # Initialize video writer
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    video_writer = cv2.VideoWriter(
+        str(output_path),
+        fourcc,
+        fps,
+        (max_width, max_height)
+    )
+
+    if not video_writer.isOpened():
+        raise RuntimeError(f"Failed to open video writer for {output_path}")
+
+    frames_per_image = int(frame_duration * fps)
+
+    for idx, (basename, image_path, pred_mask_path) in enumerate(pairs):
+        print(f"  [{idx + 1}/{len(pairs)}] Processing {basename}...")
+
+        # Load image and mask
+        image = tifffile.imread(image_path)
+        mask = tifffile.imread(pred_mask_path)
+
+        # Convert to grayscale if needed
+        if image.ndim == 3 and image.shape[-1] == 3:
+            image = np.mean(image, axis=-1).astype(image.dtype)
+
+        # Resize to standard dimensions if needed
+        if image.shape != (max_height, max_width):
+            image = cv2.resize(image, (max_width, max_height), interpolation=cv2.INTER_LINEAR)
+            mask = cv2.resize(mask, (max_width, max_height), interpolation=cv2.INTER_NEAREST)
+
+        # Normalize to 0-1
+        image_norm = image / 255.0 if image.max() > 1.0 else image
+        mask_norm = mask / 255.0 if mask.max() > 1.0 else mask
+
+        # Create base RGB image
+        rgb = np.stack([image_norm] * 3, axis=-1)
+
+        # Create overlay (green for mask)
+        overlay = rgb.copy()
+        overlay[mask_norm > 0.5, 0] = 0.0  # R
+        overlay[mask_norm > 0.5, 1] = 1.0  # G (green)
+        overlay[mask_norm > 0.5, 2] = 0.0  # B
+
+        # Blend
+        alpha_blend = mask_norm * overlay_alpha
+        result = rgb * (1 - alpha_blend[:, :, np.newaxis]) + overlay * alpha_blend[:, :, np.newaxis]
+
+        # Convert to uint8 BGR for OpenCV
+        result_uint8 = (np.clip(result, 0, 1) * 255).astype(np.uint8)
+        result_bgr = cv2.cvtColor(result_uint8, cv2.COLOR_RGB2BGR)
+
+        # Create original image frame (without overlay)
+        original_uint8 = (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
+        original_bgr = cv2.cvtColor(original_uint8, cv2.COLOR_RGB2BGR)
+
+        # Add text labels
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        text = f"{basename}"
+        text_size = cv2.getTextSize(text, font, 1, 2)[0]
+
+        # Add label to original image
+        cv2.rectangle(
+            original_bgr,
+            (10, 10),
+            (20 + text_size[0], 20 + text_size[1]),
+            (0, 0, 0),
+            -1
+        )
+        cv2.putText(
+            original_bgr,
+            text,
+            (15, 15 + text_size[1]),
+            font,
+            1,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA
+        )
+
+        # Add label to overlay image
+        cv2.rectangle(
+            result_bgr,
+            (10, 10),
+            (20 + text_size[0], 20 + text_size[1]),
+            (0, 0, 0),
+            -1
+        )
+        cv2.putText(
+            result_bgr,
+            text,
+            (15, 15 + text_size[1]),
+            font,
+            1,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA
+        )
+
+        # Write frames: first half original, second half overlay
+        half_frames = frames_per_image // 2
+
+        # First half: original image
+        for _ in range(half_frames):
+            video_writer.write(original_bgr)
+
+        # Second half: overlay
+        for _ in range(frames_per_image - half_frames):
+            video_writer.write(result_bgr)
+
+    video_writer.release()
+
+    total_duration = len(pairs) * frame_duration
+    logger.info(f"Video saved to {output_path}")
+    print(f"\n✓ Video created: {output_path}")
+    print(f"  Total duration: {total_duration:.1f}s")
+    print(f"  {len(pairs)} images × {frame_duration}s each")
+
+    return len(pairs)
+
+
 def run_review(
     image_dir: str,
     pred_mask_dir: str,

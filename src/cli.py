@@ -612,7 +612,7 @@ def predict_full():
         for idx, row in manifest_df.iterrows():
             # Resolve paths relative to data_root
             image_path = data_root / row["image_path"]
-            mask_path = data_root / row["mask_path"] if "mask_path" in row else None
+            mask_path = data_root / row["mask_path"] if "mask_path" in row and pd.notna(row["mask_path"]) else None
 
             # Run inference on this image
             metrics = predict_image_from_path(
@@ -769,6 +769,9 @@ def quantify_objects():
                 continue
 
             # Ground truth mask path
+            if "mask_path" not in row or pd.isna(row["mask_path"]):
+                logging.warning(f"No mask path specified for {basename}, skipping")
+                continue
             gt_mask_path = data_root / row["mask_path"]
             if not gt_mask_path.exists():
                 logging.warning(f"Ground truth mask not found: {gt_mask_path}, skipping")
@@ -891,6 +894,140 @@ def quantify_objects():
         return 1
 
 
+def extract_metrics():
+    """Extract morphology metrics from predicted masks without ground truth."""
+    parser = argparse.ArgumentParser(
+        description="Extract morphology metrics from predicted masks (no ground truth required)"
+    )
+    parser.add_argument(
+        "--pred-mask-dir",
+        required=True,
+        help="Directory with predicted masks (e.g., inference/predictions/)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        required=True,
+        help="Output directory for metrics CSV files",
+    )
+    parser.add_argument(
+        "--min-object-area",
+        type=int,
+        default=100,
+        help="Minimum object area in pixels (default: 100)",
+    )
+    parser.add_argument(
+        "--pixel-size",
+        type=float,
+        help="Pixel size in micrometers for physical unit conversion (optional)",
+    )
+    args = parser.parse_args()
+
+    try:
+        import pandas as pd
+        from tifffile import imread
+        from src.analysis.quantify import extract_objects, compute_object_properties
+
+        print("\n" + "=" * 80)
+        print("EXTRACT MORPHOLOGY METRICS FROM PREDICTIONS")
+        print("=" * 80)
+
+        # Parse arguments
+        pred_mask_dir = Path(args.pred_mask_dir)
+        output_dir = Path(args.output_dir)
+
+        print(f"\nConfiguration:")
+        print(f"  Predicted masks: {pred_mask_dir}")
+        print(f"  Output directory: {output_dir}")
+        print(f"  Min object area: {args.min_object_area} px")
+        if args.pixel_size:
+            print(f"  Pixel size: {args.pixel_size} µm")
+
+        # Verify inputs
+        if not pred_mask_dir.exists():
+            raise FileNotFoundError(f"Predicted mask directory not found: {pred_mask_dir}")
+
+        # Create output directories
+        output_dir.mkdir(parents=True, exist_ok=True)
+        per_image_dir = output_dir / "per_image"
+        per_image_dir.mkdir(parents=True, exist_ok=True)
+
+        # Find all predicted masks
+        pred_mask_paths = sorted(pred_mask_dir.glob("*_pred_mask.tif"))
+        if len(pred_mask_paths) == 0:
+            raise FileNotFoundError(f"No *_pred_mask.tif files found in {pred_mask_dir}")
+
+        print(f"\nFound {len(pred_mask_paths)} predicted masks")
+
+        # Process each mask
+        print("\nExtracting metrics...")
+        all_objects = []
+
+        for idx, pred_mask_path in enumerate(pred_mask_paths):
+            basename = pred_mask_path.stem.replace("_pred_mask", "")
+            print(f"  [{idx + 1}/{len(pred_mask_paths)}] Processing {basename}...")
+
+            # Load predicted mask
+            pred_mask = imread(pred_mask_path)
+
+            # Extract objects
+            labeled_mask, n_objects = extract_objects(pred_mask, min_area=args.min_object_area)
+
+            if n_objects == 0:
+                logging.warning(f"No objects found in {basename}")
+                continue
+
+            # Compute morphology metrics
+            obj_props = compute_object_properties(labeled_mask, pixel_size=args.pixel_size)
+
+            # Add image identifier
+            obj_props["image"] = basename
+
+            # Save per-image CSV
+            per_image_csv = per_image_dir / f"{basename}_objects.csv"
+            obj_props.to_csv(per_image_csv, index=False)
+
+            all_objects.append(obj_props)
+
+        # Combine all objects
+        if len(all_objects) > 0:
+            all_objects_df = pd.concat(all_objects, ignore_index=True)
+
+            # Save combined CSV
+            combined_csv = output_dir / "all_objects.csv"
+            all_objects_df.to_csv(combined_csv, index=False)
+            print(f"\n  ✓ Saved combined metrics to {combined_csv}")
+
+            # Compute summary statistics
+            summary_stats = all_objects_df.drop(columns=['image', 'object_id']).describe()
+            summary_csv = output_dir / "summary_statistics.csv"
+            summary_stats.to_csv(summary_csv)
+            print(f"  ✓ Saved summary statistics to {summary_csv}")
+
+            # Print summary
+            print("\n" + "=" * 80)
+            print("METRIC EXTRACTION COMPLETE")
+            print("=" * 80)
+            print(f"\nSummary:")
+            print(f"  Images processed: {len(pred_mask_paths)}")
+            print(f"  Total objects extracted: {len(all_objects_df)}")
+            print(f"\nMorphology Statistics:")
+            print(f"  Mean area: {all_objects_df['area'].mean():.2f}")
+            print(f"  Mean circularity: {all_objects_df['circularity'].mean():.4f}")
+            print(f"  Mean equivalent diameter: {all_objects_df['equivalent_diameter'].mean():.2f}")
+            print(f"\nOutput files:")
+            print(f"  Combined metrics: {combined_csv}")
+            print(f"  Summary stats: {summary_csv}")
+            print(f"  Per-image CSVs: {per_image_dir}/")
+        else:
+            logging.warning("No objects found in any image")
+
+        return 0
+
+    except Exception as e:
+        logging.error(f"Metric extraction failed: {e}", exc_info=True)
+        return 1
+
+
 def run_cv():
     """Phase 6: Run cross-validation experiment."""
     parser = argparse.ArgumentParser(
@@ -971,21 +1108,48 @@ def review_predictions():
         "--output-flagged",
         help="Path to save flagged images list (optional)",
     )
+    parser.add_argument(
+        "--video-export",
+        help="Export video instead of interactive review (useful for WSL/headless). Provide output video path (e.g., review.mp4)",
+    )
+    parser.add_argument(
+        "--fps",
+        type=int,
+        default=30,
+        help="Video frames per second when using --video-export (default: 30)",
+    )
     args = parser.parse_args()
 
     try:
-        from src.visualization.review import run_review
+        # Video export mode (for WSL/headless environments)
+        if args.video_export:
+            from src.visualization.review import export_review_video
 
-        # Run review
-        flagged = run_review(
-            image_dir=args.image_dir,
-            pred_mask_dir=args.pred_mask_dir,
-            display_duration=args.display_duration,
-            overlay_alpha=args.overlay_alpha,
-            output_flagged=args.output_flagged,
-        )
+            n_images = export_review_video(
+                image_dir=args.image_dir,
+                pred_mask_dir=args.pred_mask_dir,
+                output_video=args.video_export,
+                frame_duration=args.display_duration,
+                overlay_alpha=args.overlay_alpha,
+                fps=args.fps,
+            )
 
-        return 0
+            return 0
+
+        # Interactive mode
+        else:
+            from src.visualization.review import run_review
+
+            # Run review
+            flagged = run_review(
+                image_dir=args.image_dir,
+                pred_mask_dir=args.pred_mask_dir,
+                display_duration=args.display_duration,
+                overlay_alpha=args.overlay_alpha,
+                output_flagged=args.output_flagged,
+            )
+
+            return 0
 
     except Exception as e:
         logging.error(f"Review failed: {e}", exc_info=True)
