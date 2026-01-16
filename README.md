@@ -21,7 +21,25 @@ SegOid uses a U-Net architecture with a ResNet18 encoder to segment spheroids fr
 
 ---
 
-## Installation
+## Windows Executable (No Python Required)
+
+A standalone Windows executable is available for users who don't want to install Python.
+
+**Download:** `SegOid.exe` (~150MB)
+
+**Usage:**
+1. Double-click `SegOid.exe`
+2. Select input folder containing TIFF images
+3. Select output folder
+4. Click "Run Inference"
+
+The executable includes a bundled ONNX model and produces binary masks and morphology metrics.
+
+**For developers:** See [docs/WINDOWS_DESKTOP_BUNDLE.md](docs/WINDOWS_DESKTOP_BUNDLE.md) for build instructions.
+
+---
+
+## Installation (Python)
 
 **Requirements:**
 - Python 3.11+
@@ -519,6 +537,8 @@ tensorboard --logdir runs/ --reload_multifile=true
 | `train` | Train segmentation model |
 | `run_cv` | Run cross-validation |
 | `sanity_check` | Quick pipeline validation |
+| `export_onnx` | Export PyTorch model to ONNX format |
+| `segoid_gui` | Launch graphical interface |
 
 ---
 

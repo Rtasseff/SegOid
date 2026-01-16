@@ -30,6 +30,8 @@ dependencies = [
     "tensorboard>=2.13.0",
     "pyyaml>=6.0",
     "matplotlib>=3.7.0",
+    "onnx>=1.14.0",
+    "onnxruntime>=1.16.0",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +40,21 @@ dev = [
     "pytest-cov>=4.1.0",
     "black>=23.0.0",
     "flake8>=6.0.0",
+]
+# Minimal dependencies for ONNX-only inference (no PyTorch training)
+inference = [
+    "onnxruntime>=1.16.0",
+    "tifffile>=2023.0.0",
+    "imagecodecs>=2023.0.0",
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "scikit-image>=0.21.0",
+    "scipy>=1.11.0",
+    "opencv-python>=4.8.0",
+]
+# For building Windows executable
+build = [
+    "pyinstaller>=6.0.0",
 ]
 
 [project.scripts]
@@ -50,6 +67,8 @@ quantify_objects = "src.cli:quantify_objects"
 extract_metrics = "src.cli:extract_metrics"
 run_cv = "src.cli:run_cv"
 review_predictions = "src.cli:review_predictions"
+export_onnx = "src.cli:export_onnx"
+segoid_gui = "src.cli:run_gui"
 
 [tool.setuptools.packages.find]
 where = ["."]

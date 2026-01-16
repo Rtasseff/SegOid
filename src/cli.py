@@ -1154,3 +1154,117 @@ def review_predictions():
     except Exception as e:
         logging.error(f"Review failed: {e}", exc_info=True)
         return 1
+
+
+def export_onnx():
+    """Export PyTorch model checkpoint to ONNX format for deployment."""
+    parser = argparse.ArgumentParser(
+        description="Export PyTorch checkpoint to ONNX format for deployment with ONNX Runtime"
+    )
+    parser.add_argument(
+        "--checkpoint",
+        required=True,
+        help="Path to PyTorch model checkpoint (.pth file)",
+    )
+    parser.add_argument(
+        "--output",
+        required=True,
+        help="Path for output ONNX model (.onnx file)",
+    )
+    parser.add_argument(
+        "--input-size",
+        type=int,
+        default=256,
+        help="Input tile size for model (default: 256)",
+    )
+    parser.add_argument(
+        "--opset-version",
+        type=int,
+        default=17,
+        help="ONNX opset version (default: 17)",
+    )
+    parser.add_argument(
+        "--no-validate",
+        action="store_true",
+        help="Skip validation of exported model",
+    )
+    args = parser.parse_args()
+
+    try:
+        from src.inference.onnx_export import export_to_onnx, get_onnx_model_info
+
+        print("\n" + "=" * 80)
+        print("EXPORT PYTORCH MODEL TO ONNX")
+        print("=" * 80)
+
+        checkpoint_path = Path(args.checkpoint)
+        output_path = Path(args.output)
+
+        print(f"\nConfiguration:")
+        print(f"  Checkpoint: {checkpoint_path}")
+        print(f"  Output: {output_path}")
+        print(f"  Input size: {args.input_size}x{args.input_size}")
+        print(f"  ONNX opset: {args.opset_version}")
+        print(f"  Validate: {not args.no_validate}")
+
+        # Verify checkpoint exists
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+        # Export model
+        print("\nExporting model...")
+        export_to_onnx(
+            checkpoint_path=checkpoint_path,
+            output_path=output_path,
+            input_size=(args.input_size, args.input_size),
+            opset_version=args.opset_version,
+            validate=not args.no_validate,
+        )
+
+        # Print model info
+        print("\nONNX Model Info:")
+        info = get_onnx_model_info(output_path)
+        print(f"  File size: {info.get('file_size_mb', 'N/A')} MB")
+        print(f"  Opset version: {info.get('opset_version', 'N/A')}")
+        print(f"  Nodes: {info.get('num_nodes', 'N/A')}")
+
+        for inp in info.get('inputs', []):
+            print(f"  Input: {inp['name']} - shape {inp['shape']}")
+        for out in info.get('outputs', []):
+            print(f"  Output: {out['name']} - shape {out['shape']}")
+
+        print("\n" + "=" * 80)
+        print("EXPORT COMPLETE")
+        print("=" * 80)
+        print(f"\nONNX model saved to: {output_path}")
+        print("\nUsage:")
+        print(f"  # Use with predict_full (CLI)")
+        print(f"  predict_full --onnx-model {output_path} --manifest <images.csv> --output-dir <output/>")
+        print(f"\n  # Use with GUI")
+        print(f"  segoid_gui  # Then select the ONNX file as custom model")
+        print("\n" + "=" * 80 + "\n")
+
+        return 0
+
+    except Exception as e:
+        logging.error(f"ONNX export failed: {e}", exc_info=True)
+        return 1
+
+
+def run_gui():
+    """Launch the SegOid graphical user interface."""
+    try:
+        from src.gui.app import main as gui_main
+
+        gui_main()
+        return 0
+
+    except ImportError as e:
+        logging.error(f"GUI dependencies not available: {e}")
+        print("\nThe GUI requires tkinter. On Linux, install with:")
+        print("  sudo apt-get install python3-tk")
+        return 1
+
+    except Exception as e:
+        logging.error(f"GUI failed: {e}", exc_info=True)
+        return 1

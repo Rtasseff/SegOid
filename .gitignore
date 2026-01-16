@@ -57,6 +57,7 @@ htmlcov/
 *.pth
 *.pt
 *.ckpt
+*.onnx
 
 # TensorBoard logs
 events.out.tfevents.*
@@ -71,6 +72,14 @@ events.out.tfevents.*
 *.swo
 *~
 .*.sw?
+
+# Windows Zone.Identifier files
+*:Zone.Identifier
+
+# PyInstaller build outputs
+/dist/
+/build/
+*.spec.bak
 
 # PyTorch extensions
 *.so
