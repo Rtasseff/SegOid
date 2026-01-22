@@ -192,6 +192,7 @@ def save_checkpoint(
     epoch: int,
     best_val_dice: float,
     history: dict,
+    model_config: Optional[dict] = None,
 ) -> None:
     """
     Save training checkpoint.
@@ -204,6 +205,7 @@ def save_checkpoint(
         epoch: Current epoch
         best_val_dice: Best validation Dice so far
         history: Training history
+        model_config: Model architecture configuration (encoder_name, in_channels, classes)
     """
     checkpoint = {
         "epoch": epoch,
@@ -211,6 +213,7 @@ def save_checkpoint(
         "optimizer_state_dict": optimizer.state_dict(),
         "best_val_dice": best_val_dice,
         "history": history,
+        "model_config": model_config,
     }
 
     if scheduler is not None:
@@ -499,14 +502,21 @@ def train_model(
     save_config(config, run_dir / "config.yaml")
 
     # Create model
-    model_config = config["model"]
+    model_cfg = config["model"]
     model = create_model(
-        encoder_name=model_config["encoder"],
-        encoder_weights=model_config["encoder_weights"],
-        in_channels=model_config["in_channels"],
-        classes=model_config["classes"],
+        encoder_name=model_cfg["encoder"],
+        encoder_weights=model_cfg["encoder_weights"],
+        in_channels=model_cfg["in_channels"],
+        classes=model_cfg["classes"],
     )
     model = model.to(device)
+
+    # Store model config for checkpoint (enables architecture reconstruction at inference)
+    model_config = {
+        "encoder_name": model_cfg["encoder"],
+        "in_channels": model_cfg["in_channels"],
+        "classes": model_cfg["classes"],
+    }
 
     # Setup loss and optimizer
     loss_config = config["loss"]
@@ -647,6 +657,7 @@ def train_model(
                     epoch,
                     best_val_dice,
                     history,
+                    model_config=model_config,
                 )
                 logger.info(f"New best model! Val Dice: {best_val_dice:.4f}")
 
@@ -663,6 +674,7 @@ def train_model(
                     epoch,
                     best_val_dice,
                     history,
+                    model_config=model_config,
                 )
 
         # Early stopping check
@@ -688,6 +700,7 @@ def train_model(
             epoch,
             best_val_dice,
             history,
+            model_config=model_config,
         )
 
     # Close TensorBoard writer

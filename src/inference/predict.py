@@ -241,6 +241,14 @@ def _get_smp():
     return _smp
 
 
+# Default model config for backward compatibility with old checkpoints
+DEFAULT_MODEL_CONFIG = {
+    "encoder_name": "resnet18",
+    "in_channels": 1,
+    "classes": 1,
+}
+
+
 def load_model_from_checkpoint(
     checkpoint_path: Path,
     device=None,
@@ -248,6 +256,10 @@ def load_model_from_checkpoint(
 ):
     """
     Load trained model from checkpoint.
+
+    The model architecture is read from the checkpoint's model_config field.
+    For backward compatibility with older checkpoints that don't have this field,
+    falls back to default configuration (resnet18 encoder, 1 input channel, 1 class).
 
     Args:
         checkpoint_path: Path to model checkpoint (.pth file)
@@ -267,12 +279,28 @@ def load_model_from_checkpoint(
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
 
-    # Create model with same architecture as training
+    # Read model config from checkpoint, fall back to defaults for old checkpoints
+    model_config = checkpoint.get("model_config", None)
+    if model_config is None:
+        _log(
+            "No model_config in checkpoint, using defaults (resnet18 encoder)",
+            "WARNING",
+            log_callback,
+        )
+        model_config = DEFAULT_MODEL_CONFIG
+    else:
+        _log(
+            f"Using model config from checkpoint: encoder={model_config.get('encoder_name')}",
+            "INFO",
+            log_callback,
+        )
+
+    # Create model with architecture from checkpoint
     model = smp.Unet(
-        encoder_name="resnet18",
-        encoder_weights=None,
-        in_channels=1,
-        classes=1,
+        encoder_name=model_config["encoder_name"],
+        encoder_weights=None,  # Don't load pretrained weights, we have trained weights
+        in_channels=model_config["in_channels"],
+        classes=model_config["classes"],
     )
 
     model.load_state_dict(checkpoint["model_state_dict"])
