@@ -131,6 +131,7 @@ predict_full \
 | `--overlap` | 0.25 | Tile overlap fraction (0.25 = 25%) |
 | `--threshold` | 0.5 | Probability threshold for binary mask |
 | `--min-object-area` | 100 | Remove objects smaller than this (px²) |
+| `--pixel-size` | None | Pixel size of input images (µm/px). See Multi-Resolution section below. |
 
 **Output:**
 
@@ -153,6 +154,57 @@ predict_full ... --threshold 0.3
 # More conservative (fewer false positives, may miss faint spheroids)
 predict_full ... --threshold 0.7
 ```
+
+---
+
+### Multi-Resolution Inference
+
+The production model was trained on images at **2.76 µm/pixel**. If your images are captured at a different magnification, use `--pixel-size` for automatic rescaling:
+
+```bash
+# High-magnification images (1.1 µm/pixel)
+predict_full \
+    --checkpoint runs/train_20251229_194116/checkpoints/best_model.pth \
+    --manifest high_mag_images.csv \
+    --output-dir inference/high_mag/ \
+    --pixel-size 1.1
+
+# Low-magnification images (5.0 µm/pixel)
+predict_full \
+    --checkpoint model.pth \
+    --manifest low_mag_images.csv \
+    --output-dir inference/low_mag/ \
+    --pixel-size 5.0
+```
+
+**How it works:**
+1. Input image is automatically rescaled to match training resolution (2.76 µm/px)
+2. Inference runs on rescaled image
+3. Probability map is rescaled back to original resolution
+4. Output masks are at your original image resolution
+
+**Performance benefits:**
+- High-resolution images (e.g., 1.1 µm/px) are downsampled → **faster inference**
+- Example: 4000×4000 image → rescaled to ~1594×1594 → ~6× fewer tiles
+
+**Quality Guidelines:**
+
+| Input Pixel Size | Scale Factor | Quality | Notes |
+|------------------|--------------|---------|-------|
+| 2.3 - 3.5 µm/px | 0.8 - 1.2× | ✓ Excellent | Safe to use |
+| 1.4 - 2.3 or 3.5 - 5.5 µm/px | 0.5 - 0.8 or 1.2 - 2.0× | ✓ Good | Should work well |
+| 0.9 - 1.4 or 5.5 - 9.2 µm/px | 0.3 - 0.5 or 2.0 - 3.0× | ⚠ Fair | Expect some degradation |
+| <0.9 or >9.2 µm/px | <0.3 or >3.0× | ✗ Poor | Retrain at target resolution |
+
+**Limitations:**
+- **Very high magnification (<0.3× scale)**: Model sees overly magnified texture, loses whole-spheroid context
+- **Very low magnification (>3.0× scale)**: Model sees blurry, undersampled spheroids, loses fine details
+- **Memory**: Peak usage ~2.5× original image size during processing
+- **Interpolation artifacts**: 1-2 pixel smoothing at boundaries (acceptable for most use cases)
+
+For regular processing at extreme magnifications, consider retraining the model at that target resolution.
+
+---
 
 ### Step 3: Interactive Prediction Review
 
@@ -225,16 +277,32 @@ metrics/my_batch/
 
 **Morphology Metrics Per Object:**
 
-| Metric | Description |
-|--------|-------------|
-| `area` | Object area in pixels |
-| `perimeter` | Boundary length |
-| `equivalent_diameter` | Diameter of equal-area circle |
-| `major_axis_length` | Major axis of fitted ellipse |
-| `minor_axis_length` | Minor axis of fitted ellipse |
-| `eccentricity` | Ellipse eccentricity (0=circle, 1=line) |
-| `circularity` | 4πA/P² (1=perfect circle) |
-| `centroid_x`, `centroid_y` | Object center coordinates |
+When `--pixel-size` is provided, both pixel and physical measurements are output:
+
+| Metric (pixel) | Metric (physical) | Description |
+|----------------|-------------------|-------------|
+| `area_px` | `area_um2` | Object area in pixels² / µm² |
+| `perimeter_px` | `perimeter_um` | Boundary length in pixels / µm |
+| `equivalent_diameter_px` | `equivalent_diameter_um` | Diameter of equal-area circle |
+| `major_axis_length_px` | `major_axis_length_um` | Major axis of fitted ellipse |
+| `minor_axis_length_px` | `minor_axis_length_um` | Minor axis of fitted ellipse |
+| `eccentricity` | — | Ellipse eccentricity (0=circle, 1=line) |
+| `circularity` | — | 4πA/P² (1=perfect circle) |
+| `centroid_x`, `centroid_y` | — | Object center coordinates (pixels) |
+
+When `--pixel-size` is **not** provided, only pixel measurements are output (e.g., `area_px`, `perimeter_px`).
+
+**Example with physical units:**
+
+```bash
+quantify_objects \
+    --pred-mask-dir inference/my_batch/ \
+    --gt-manifest my_images.csv \
+    --output-dir metrics/my_batch/ \
+    --pixel-size 2.76
+```
+
+Output CSV will include columns like: `area_px`, `area_um2`, `equivalent_diameter_px`, `equivalent_diameter_um`, etc.
 
 ---
 
