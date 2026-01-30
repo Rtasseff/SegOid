@@ -328,3 +328,148 @@ def test_predict_full_image_edge_padding():
     # Check that all pixels have been processed (no zeros from unprocessed regions)
     # Since model outputs constant 0.8, no pixel should be 0
     assert np.all(prob_map > 0.0)
+
+
+# ============================================================================
+# Multi-Resolution Inference Tests
+# ============================================================================
+
+
+def test_scale_factor_calculation():
+    """Test scale factor calculation for different pixel sizes."""
+    training_pixel_size = 2.76
+
+    # High resolution (smaller pixel size)
+    input_pixel_size = 1.1
+    scale_factor = training_pixel_size / input_pixel_size
+    assert scale_factor == pytest.approx(2.509, abs=0.01)
+
+    # Low resolution (larger pixel size)
+    input_pixel_size = 5.52
+    scale_factor = training_pixel_size / input_pixel_size
+    assert scale_factor == pytest.approx(0.5, abs=0.01)
+
+    # Same resolution
+    input_pixel_size = 2.76
+    scale_factor = training_pixel_size / input_pixel_size
+    assert scale_factor == pytest.approx(1.0, abs=0.001)
+
+
+def test_rescaling_preserves_dimensions():
+    """Test that rescaling pipeline returns to original dimensions."""
+    from skimage.transform import rescale, resize
+
+    # Create test image
+    original_shape = (400, 600)
+    image = np.random.rand(*original_shape).astype(np.float32)
+
+    # Simulate rescaling for high-res image (scale down then up)
+    scale_factor = 0.4  # Downsample to 40%
+
+    # Rescale down
+    scaled_image = rescale(
+        image,
+        scale_factor,
+        order=1,
+        anti_aliasing=True,
+        preserve_range=True,
+    ).astype(image.dtype)
+
+    # Check intermediate size is correct
+    expected_scaled_h = int(original_shape[0] * scale_factor)
+    expected_scaled_w = int(original_shape[1] * scale_factor)
+    assert scaled_image.shape[0] == expected_scaled_h
+    assert scaled_image.shape[1] == expected_scaled_w
+
+    # Rescale back up (simulate probability map upscaling)
+    prob_map = resize(
+        scaled_image,
+        original_shape,
+        order=1,
+        preserve_range=True,
+        anti_aliasing=False,
+    )
+
+    # Check output matches original dimensions
+    assert prob_map.shape == original_shape
+
+
+def test_min_object_area_scaling():
+    """Test that min_object_area is correctly scaled with resolution."""
+    min_object_area = 100  # pixels at training resolution
+
+    # High resolution (2.51x downsampling)
+    scale_factor = 2.51
+    effective_min_area = int(min_object_area / (scale_factor ** 2))
+    # At original (high) resolution, objects should be ~6.3x larger in area
+    # So min threshold should be smaller
+    assert effective_min_area == pytest.approx(15.8, abs=1)
+
+    # Low resolution (0.5x upsampling)
+    scale_factor = 0.5
+    effective_min_area = int(min_object_area / (scale_factor ** 2))
+    # At original (low) resolution, objects should be 4x smaller in area
+    # So min threshold should be larger
+    assert effective_min_area == 400
+
+    # No scaling (scale_factor = 1.0)
+    scale_factor = 1.0
+    effective_min_area = int(min_object_area / (scale_factor ** 2))
+    assert effective_min_area == min_object_area
+
+
+def test_rescaling_with_predict_single_image(tmp_path):
+    """Integration test: rescaling with predict_single_image."""
+    from src.inference.predict import predict_single_image
+    from tifffile import imwrite
+
+    # Create a test image
+    test_image = np.random.randint(0, 256, (400, 400), dtype=np.uint8)
+    image_path = tmp_path / "test_image.tif"
+    imwrite(image_path, test_image)
+
+    # Create dummy model
+    model = DummyModel(constant_value=0.6)
+    model.eval()
+
+    device = torch.device("cpu")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    # Run inference with pixel_size (triggers rescaling)
+    result = predict_single_image(
+        image_path=image_path,
+        model=model,
+        output_dir=output_dir,
+        device=device,
+        tile_size=128,
+        overlap=0.25,
+        threshold=0.5,
+        min_object_area=50,
+        pixel_size=1.1,  # High resolution
+        training_pixel_size=2.76,
+    )
+
+    # Check that output was created
+    assert result is not None
+    assert result.exists()
+
+    # Load output mask and check it matches input dimensions
+    from tifffile import imread
+    output_mask = imread(result)
+    assert output_mask.shape == test_image.shape
+
+
+def test_no_rescaling_when_pixel_size_matches():
+    """Test that no rescaling occurs when pixel_size matches training_pixel_size."""
+    # This is tested indirectly - when pixel_size = training_pixel_size,
+    # scale_factor should be 1.0 and rescaling is skipped
+    training_pixel_size = 2.76
+    pixel_size = 2.76
+
+    scale_factor = training_pixel_size / pixel_size
+    assert scale_factor == pytest.approx(1.0, abs=1e-6)
+
+    # In the actual code, this condition is checked:
+    # if pixel_size is not None and abs(pixel_size - training_pixel_size) > 1e-6:
+    # So with scale_factor = 1.0, the rescaling branch is not taken

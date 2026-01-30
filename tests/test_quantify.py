@@ -86,7 +86,7 @@ class TestComputeObjectProperties:
 
         assert len(df) == 0
         assert 'object_id' in df.columns
-        assert 'area' in df.columns
+        assert 'area_px' in df.columns
         assert 'circularity' in df.columns
 
     def test_single_square(self):
@@ -98,7 +98,7 @@ class TestComputeObjectProperties:
 
         assert len(df) == 1
         assert df.loc[0, 'object_id'] == 1
-        assert df.loc[0, 'area'] == 400  # 20 * 20
+        assert df.loc[0, 'area_px'] == 400  # 20 * 20
 
         # Square is fairly circular
         assert df.loc[0, 'circularity'] > 0.7
@@ -130,7 +130,7 @@ class TestComputeObjectProperties:
 
         assert len(df) == 3
         assert list(df['object_id']) == [1, 2, 3]
-        assert all(df['area'] == 100)  # All 10x10 squares
+        assert all(df['area_px'] == 100)  # All 10x10 squares
 
     def test_physical_units_conversion(self):
         """Pixel size should convert to physical units."""
@@ -140,8 +140,15 @@ class TestComputeObjectProperties:
         pixel_size = 0.5  # µm per pixel
         df = compute_object_properties(labeled, pixel_size=pixel_size)
 
+        # Should have both pixel and physical unit columns
+        assert 'area_px' in df.columns
+        assert 'area_um2' in df.columns
+
+        # Area in pixels: 400
+        assert df.loc[0, 'area_px'] == 400
+
         # Area in µm²: 400 * (0.5)² = 100
-        assert df.loc[0, 'area'] == 100.0
+        assert df.loc[0, 'area_um2'] == 100.0
 
     def test_bounding_box(self):
         """Bounding box should match object location."""
