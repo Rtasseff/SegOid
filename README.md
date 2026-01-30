@@ -241,6 +241,49 @@ sample_007.tif
 sample_012.tif
 ```
 
+---
+
+#### Alternative: Video Export (for WSL/Headless)
+
+If you're running on WSL or a headless server where the interactive display doesn't work, export a video instead:
+
+```bash
+review_predictions \
+    --image-dir path/to/your/images/ \
+    --pred-mask-dir inference/my_batch/ \
+    --video-export review.mp4
+```
+
+**Optional parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--display-duration` | 3.0 | Seconds to show each image |
+| `--overlay-alpha` | 0.5 | Mask transparency (0.0-1.0) |
+| `--fps` | 30 | Video frames per second |
+
+**Example with custom settings:**
+
+```bash
+review_predictions \
+    --image-dir path/to/images/ \
+    --pred-mask-dir inference/my_batch/ \
+    --video-export review.mp4 \
+    --display-duration 5.0 \
+    --overlay-alpha 0.6 \
+    --fps 30
+```
+
+The output video shows: original image → mask overlay → next image...
+
+This is useful for:
+- WSL environments (display issues)
+- Remote/headless servers
+- Sharing predictions with collaborators
+- Offline review
+
+---
+
 ### Step 4: Compute Morphology Metrics (Optional)
 
 Extract quantitative measurements from segmented spheroids:
@@ -327,11 +370,17 @@ predict_full \
     --output-dir inference/batch_001/ \
     --data-root /
 
-# 4. Review predictions interactively
+# 4. Review predictions interactively (or use --video-export for WSL/headless)
 review_predictions \
     --image-dir /data/new_experiment/ \
     --pred-mask-dir inference/batch_001/ \
     --output-flagged batch_001_flagged.txt
+
+# Alternative: Export video for offline review
+# review_predictions \
+#     --image-dir /data/new_experiment/ \
+#     --pred-mask-dir inference/batch_001/ \
+#     --video-export batch_001_review.mp4
 
 # 5. Check which images were flagged
 cat batch_001_flagged.txt
@@ -598,7 +647,7 @@ tensorboard --logdir runs/ --reload_multifile=true
 | Command | Purpose |
 |---------|---------|
 | `predict_full` | Run inference on images |
-| `review_predictions` | Interactive prediction review |
+| `review_predictions` | Interactive prediction review (or video export with `--video-export`) |
 | `quantify_objects` | Compute morphology metrics |
 | `validate_dataset` | Check dataset integrity |
 | `make_splits` | Create train/val/test splits |
