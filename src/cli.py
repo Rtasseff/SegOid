@@ -547,6 +547,12 @@ def predict_full():
         default="data/",
         help="Root directory for image/mask paths (default: data/)",
     )
+    parser.add_argument(
+        "--pixel-size",
+        type=float,
+        help="Pixel size of input images in µm/pixel. Images will be rescaled to match "
+             "training resolution (stored in checkpoint). Omit for images already at training resolution.",
+    )
     args = parser.parse_args()
 
     try:
@@ -576,6 +582,8 @@ def predict_full():
         print(f"  Overlap: {args.overlap}")
         print(f"  Threshold: {args.threshold}")
         print(f"  Min object area: {args.min_object_area} px")
+        if args.pixel_size is not None:
+            print(f"  Input pixel size: {args.pixel_size} µm/px (rescaling enabled)")
 
         # Verify checkpoint exists
         if not checkpoint_path.exists():
@@ -598,7 +606,8 @@ def predict_full():
 
         # Load model
         print("\nLoading model...")
-        model = load_model_from_checkpoint(checkpoint_path, device)
+        model, training_pixel_size = load_model_from_checkpoint(checkpoint_path, device)
+        print(f"  Training pixel size: {training_pixel_size} µm/px")
 
         # Load manifest
         print("\nLoading manifest...")
@@ -625,6 +634,8 @@ def predict_full():
                 overlap=args.overlap,
                 threshold=args.threshold,
                 min_object_area=args.min_object_area,
+                pixel_size=args.pixel_size,
+                training_pixel_size=training_pixel_size,
             )
 
             if metrics:  # If ground truth was available
@@ -916,9 +927,15 @@ def extract_metrics():
         help="Minimum object area in pixels (default: 100)",
     )
     parser.add_argument(
+        "--scale-to-um",
+        action="store_true",
+        help="Scale metrics to micrometers using pixel size (default: 2.76 µm/pixel)",
+    )
+    parser.add_argument(
         "--pixel-size",
         type=float,
-        help="Pixel size in micrometers for physical unit conversion (optional)",
+        default=2.76,
+        help="Pixel size in micrometers per pixel (default: 2.76). Only used with --scale-to-um",
     )
     args = parser.parse_args()
 
@@ -935,12 +952,15 @@ def extract_metrics():
         pred_mask_dir = Path(args.pred_mask_dir)
         output_dir = Path(args.output_dir)
 
+        # Determine pixel size for scaling
+        pixel_size = args.pixel_size if args.scale_to_um else None
+
         print(f"\nConfiguration:")
         print(f"  Predicted masks: {pred_mask_dir}")
         print(f"  Output directory: {output_dir}")
         print(f"  Min object area: {args.min_object_area} px")
-        if args.pixel_size:
-            print(f"  Pixel size: {args.pixel_size} µm")
+        if pixel_size:
+            print(f"  Scale to µm: enabled (pixel size: {pixel_size} µm/pixel)")
 
         # Verify inputs
         if not pred_mask_dir.exists():
@@ -977,7 +997,7 @@ def extract_metrics():
                 continue
 
             # Compute morphology metrics
-            obj_props = compute_object_properties(labeled_mask, pixel_size=args.pixel_size)
+            obj_props = compute_object_properties(labeled_mask, pixel_size=pixel_size)
 
             # Add image identifier
             obj_props["image"] = basename
@@ -1010,10 +1030,13 @@ def extract_metrics():
             print(f"\nSummary:")
             print(f"  Images processed: {len(pred_mask_paths)}")
             print(f"  Total objects extracted: {len(all_objects_df)}")
+            # Print morphology stats with appropriate units
+            area_unit = "µm²" if pixel_size else "px²"
+            length_unit = "µm" if pixel_size else "px"
             print(f"\nMorphology Statistics:")
-            print(f"  Mean area: {all_objects_df['area'].mean():.2f}")
+            print(f"  Mean area: {all_objects_df['area'].mean():.2f} {area_unit}")
             print(f"  Mean circularity: {all_objects_df['circularity'].mean():.4f}")
-            print(f"  Mean equivalent diameter: {all_objects_df['equivalent_diameter'].mean():.2f}")
+            print(f"  Mean equivalent diameter: {all_objects_df['equivalent_diameter'].mean():.2f} {length_unit}")
             print(f"\nOutput files:")
             print(f"  Combined metrics: {combined_csv}")
             print(f"  Summary stats: {summary_csv}")

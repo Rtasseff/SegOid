@@ -516,6 +516,7 @@ def train_model(
         "encoder_name": model_cfg["encoder"],
         "in_channels": model_cfg["in_channels"],
         "classes": model_cfg["classes"],
+        "training_pixel_size": model_cfg.get("training_pixel_size", 2.76),  # Default to 2.76 µm/px
     }
 
     # Setup loss and optimizer

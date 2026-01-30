@@ -38,6 +38,7 @@ class InferenceJob:
         compute_metrics: bool = True,
         export_video: bool = False,
         filename_schema: Optional[dict] = None,
+        pixel_size: Optional[float] = None,
     ):
         """
         Initialize inference job.
@@ -51,6 +52,7 @@ class InferenceJob:
             compute_metrics: Whether to compute morphology metrics
             export_video: Whether to export review video
             filename_schema: Optional dict with 'labels' for filename parsing
+            pixel_size: Optional pixel size in µm/pixel for scaling metrics
         """
         self.input_folder = Path(input_folder)
         self.output_folder = Path(output_folder)
@@ -60,6 +62,7 @@ class InferenceJob:
         self.compute_metrics = compute_metrics
         self.export_video = export_video
         self.filename_schema = filename_schema
+        self.pixel_size = pixel_size
 
         self._thread: Optional[threading.Thread] = None
         self._cancelled = False
@@ -172,6 +175,7 @@ class InferenceJob:
             image_paths=image_paths,
             model=model,
             output_dir=self.output_folder,
+            pixel_size=self.pixel_size,  # For multi-resolution inference
             log_callback=self.log_callback,
         )
 
@@ -180,6 +184,9 @@ class InferenceJob:
         try:
             from src.analysis.quantify import extract_objects, compute_object_properties
             from src.inference.predict import imread  # Use PIL-based imread for Windows compatibility
+
+            if self.pixel_size:
+                self._log(f"Scaling metrics to µm (pixel size: {self.pixel_size} µm/px)")
 
             all_objects = []
 
@@ -194,7 +201,7 @@ class InferenceJob:
                     labeled, n_objects = extract_objects(mask, min_area=100)
 
                     if n_objects > 0:
-                        props = compute_object_properties(labeled)
+                        props = compute_object_properties(labeled, pixel_size=self.pixel_size)
                         props["image"] = basename
 
                         # Add filename metadata if schema provided
@@ -282,6 +289,7 @@ def run_inference_job(
     compute_metrics: bool = True,
     export_video: bool = False,
     filename_schema: Optional[dict] = None,
+    pixel_size: Optional[float] = None,
 ) -> InferenceJob:
     """
     Create and start an inference job.
@@ -295,6 +303,7 @@ def run_inference_job(
         compute_metrics: Whether to compute metrics
         export_video: Whether to export video
         filename_schema: Optional filename parsing schema
+        pixel_size: Optional pixel size in µm/pixel for scaling metrics
 
     Returns:
         Started InferenceJob instance
@@ -308,6 +317,7 @@ def run_inference_job(
         compute_metrics=compute_metrics,
         export_video=export_video,
         filename_schema=filename_schema,
+        pixel_size=pixel_size,
     )
     job.start()
     return job

@@ -128,6 +128,26 @@ class SegOidApp:
         )
         self.output_picker.pack(fill=tk.X, pady=2)
 
+        # Inference Settings section
+        inference_frame = ttk.LabelFrame(main_frame, text="Inference Settings", padding=10)
+        inference_frame.pack(fill=tk.X, pady=5)
+
+        # Pixel size for multi-resolution inference
+        pixel_size_row = ttk.Frame(inference_frame)
+        pixel_size_row.pack(fill=tk.X)
+
+        ttk.Label(pixel_size_row, text="Pixel size (µm/pixel):").pack(side=tk.LEFT)
+        self.inference_pixel_size_entry = ttk.Entry(pixel_size_row, width=10)
+        self.inference_pixel_size_entry.insert(0, "2.76")
+        self.inference_pixel_size_entry.pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(
+            inference_frame,
+            text="Leave at 2.76 for standard resolution images. Enter 1.1 for high-mag images.",
+            font=("TkDefaultFont", 8),
+            foreground="gray",
+        ).pack(anchor=tk.W, pady=(2, 0))
+
         # Options section
         options_frame = ttk.LabelFrame(main_frame, text="Options", padding=10)
         options_frame.pack(fill=tk.X, pady=5)
@@ -136,8 +156,29 @@ class SegOidApp:
             options_frame,
             label="Compute morphology metrics (area, circularity, etc.)",
             initial_value=True,
+            on_change=self._on_metrics_toggle,
         )
         self.compute_metrics.pack(anchor=tk.W)
+
+        # Scale to micrometers option (sub-option of compute_metrics)
+        self.scale_frame = ttk.Frame(options_frame)
+        self.scale_frame.pack(fill=tk.X, pady=(0, 5))
+
+        self.scale_to_um = CheckboxOption(
+            self.scale_frame,
+            label="Scale to micrometers (µm)",
+            initial_value=False,
+            on_change=self._on_scale_toggle,
+        )
+        self.scale_to_um.pack(side=tk.LEFT, padx=(20, 5))
+
+        self.pixel_size_label = ttk.Label(self.scale_frame, text="Pixel size (µm/px):")
+        self.pixel_size_entry = ttk.Entry(self.scale_frame, width=8)
+        self.pixel_size_entry.insert(0, "2.76")
+
+        # Initially hidden (scale_to_um not checked)
+        self.pixel_size_label.pack_forget()
+        self.pixel_size_entry.pack_forget()
 
         self.export_video = CheckboxOption(
             options_frame,
@@ -242,6 +283,22 @@ class SegOidApp:
             self.schema_label.pack_forget()
             self.schema_entry.pack_forget()
 
+    def _on_metrics_toggle(self, enabled: bool):
+        """Handle compute metrics toggle - show/hide scale options."""
+        if enabled:
+            self.scale_frame.pack(fill=tk.X, pady=(0, 5))
+        else:
+            self.scale_frame.pack_forget()
+
+    def _on_scale_toggle(self, enabled: bool):
+        """Handle scale to micrometers toggle - show/hide pixel size entry."""
+        if enabled:
+            self.pixel_size_label.pack(side=tk.LEFT, padx=(5, 2))
+            self.pixel_size_entry.pack(side=tk.LEFT)
+        else:
+            self.pixel_size_label.pack_forget()
+            self.pixel_size_entry.pack_forget()
+
     def _get_model_path(self) -> Optional[Path]:
         """Get the model path to use."""
         if self.use_custom_model.get():
@@ -293,6 +350,31 @@ class SegOidApp:
             labels = [l.strip() for l in self.schema_entry.get().split(",")]
             filename_schema = {"labels": labels, "delimiter": "_"}
 
+        # Get inference pixel size (for multi-resolution rescaling)
+        inference_pixel_size = None
+        try:
+            pixel_size_str = self.inference_pixel_size_entry.get().strip()
+            if pixel_size_str:
+                inference_pixel_size = float(pixel_size_str)
+        except ValueError:
+            messagebox.showerror("Error", "Invalid inference pixel size. Please enter a number.")
+            self.run_btn.config(state=tk.NORMAL)
+            self.cancel_btn.config(state=tk.DISABLED)
+            return
+
+        # Get metrics pixel size if scaling to micrometers
+        # If not specified, use inference pixel size
+        metrics_pixel_size = None
+        if self.compute_metrics.get() and self.scale_to_um.get():
+            try:
+                metrics_pixel_size = float(self.pixel_size_entry.get())
+            except ValueError:
+                # Fall back to inference pixel size
+                metrics_pixel_size = inference_pixel_size
+
+        # Use inference pixel size for both inference rescaling and metrics if available
+        pixel_size = inference_pixel_size if inference_pixel_size is not None else metrics_pixel_size
+
         # Create and start job
         self.current_job = InferenceJob(
             input_folder=self.input_picker.get(),
@@ -303,6 +385,7 @@ class SegOidApp:
             compute_metrics=self.compute_metrics.get(),
             export_video=self.export_video.get(),
             filename_schema=filename_schema,
+            pixel_size=pixel_size,  # Used for both inference rescaling and metrics
         )
         self.current_job.start()
 

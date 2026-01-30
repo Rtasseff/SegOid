@@ -61,18 +61,27 @@ def compute_object_properties(
     """
     Compute morphology metrics for each object in labeled mask.
 
+    When pixel_size is provided, outputs both pixel and physical measurements.
+
     Args:
         labeled_mask: Integer array (H, W) with unique label per object (0 = background)
         pixel_size: Optional pixel size in micrometers for physical unit conversion
 
     Returns:
         DataFrame with one row per object containing:
-            - object_id: unique identifier (matches label in labeled_mask)
-            - area: pixel count (or µm² if pixel_size provided)
-            - perimeter: boundary length (px or µm)
-            - equivalent_diameter: diameter of equal-area circle (px or µm)
-            - major_axis_length: fitted ellipse major axis (px or µm)
-            - minor_axis_length: fitted ellipse minor axis (px or µm)
+        - object_id: unique identifier (matches label in labeled_mask)
+
+        When pixel_size is None (pixel measurements only):
+            - area_px, perimeter_px, equivalent_diameter_px, major_axis_length_px, minor_axis_length_px
+
+        When pixel_size is provided (both pixel and physical measurements):
+            - area_px, area_um2
+            - perimeter_px, perimeter_um
+            - equivalent_diameter_px, equivalent_diameter_um
+            - major_axis_length_px, major_axis_length_um
+            - minor_axis_length_px, minor_axis_length_um
+
+        Always included:
             - eccentricity: ellipse eccentricity (0=circle, 1=line)
             - circularity: 4πA/P² (1=perfect circle)
             - centroid_x, centroid_y: object center (px)
@@ -80,14 +89,32 @@ def compute_object_properties(
     """
     props = measure.regionprops(labeled_mask)
 
-    if len(props) == 0:
-        # Return empty DataFrame with expected columns
-        return pd.DataFrame(columns=[
-            'object_id', 'area', 'perimeter', 'equivalent_diameter',
-            'major_axis_length', 'minor_axis_length', 'eccentricity',
+    # Determine column names based on whether physical units are included
+    if pixel_size is None:
+        # Pixel-only columns
+        base_columns = [
+            'object_id', 'area_px', 'perimeter_px', 'equivalent_diameter_px',
+            'major_axis_length_px', 'minor_axis_length_px', 'eccentricity',
             'circularity', 'centroid_x', 'centroid_y',
             'bbox_min_row', 'bbox_min_col', 'bbox_max_row', 'bbox_max_col'
-        ])
+        ]
+    else:
+        # Both pixel and physical unit columns
+        base_columns = [
+            'object_id',
+            'area_px', 'area_um2',
+            'perimeter_px', 'perimeter_um',
+            'equivalent_diameter_px', 'equivalent_diameter_um',
+            'major_axis_length_px', 'major_axis_length_um',
+            'minor_axis_length_px', 'minor_axis_length_um',
+            'eccentricity', 'circularity',
+            'centroid_x', 'centroid_y',
+            'bbox_min_row', 'bbox_min_col', 'bbox_max_row', 'bbox_max_col'
+        ]
+
+    if len(props) == 0:
+        # Return empty DataFrame with expected columns
+        return pd.DataFrame(columns=base_columns)
 
     records = []
 
@@ -99,34 +126,27 @@ def compute_object_properties(
             circularity = 0.0
 
         # Base metrics (in pixels)
-        area = prop.area
-        perimeter = prop.perimeter
-        equiv_diameter = prop.equivalent_diameter_area
+        area_px = prop.area
+        perimeter_px = prop.perimeter
+        equiv_diameter_px = prop.equivalent_diameter_area
 
         # Use new property names (axis_major_length/axis_minor_length in scikit-image 0.26+)
         # Try new API first, fallback to deprecated for older versions
         try:
-            major_axis = prop.axis_major_length
-            minor_axis = prop.axis_minor_length
+            major_axis_px = prop.axis_major_length
+            minor_axis_px = prop.axis_minor_length
         except AttributeError:
-            major_axis = prop.major_axis_length
-            minor_axis = prop.minor_axis_length
+            major_axis_px = prop.major_axis_length
+            minor_axis_px = prop.minor_axis_length
 
-        # Convert to physical units if pixel size provided
-        if pixel_size is not None:
-            area = area * (pixel_size ** 2)
-            perimeter = perimeter * pixel_size
-            equiv_diameter = equiv_diameter * pixel_size
-            major_axis = major_axis * pixel_size
-            minor_axis = minor_axis * pixel_size
-
+        # Build record
         record = {
             'object_id': prop.label,
-            'area': area,
-            'perimeter': perimeter,
-            'equivalent_diameter': equiv_diameter,
-            'major_axis_length': major_axis,
-            'minor_axis_length': minor_axis,
+            'area_px': area_px,
+            'perimeter_px': perimeter_px,
+            'equivalent_diameter_px': equiv_diameter_px,
+            'major_axis_length_px': major_axis_px,
+            'minor_axis_length_px': minor_axis_px,
             'eccentricity': prop.eccentricity,
             'circularity': circularity,
             'centroid_x': prop.centroid[1],  # Column (X coordinate)
@@ -136,6 +156,14 @@ def compute_object_properties(
             'bbox_max_row': prop.bbox[2],
             'bbox_max_col': prop.bbox[3],
         }
+
+        # Add physical unit measurements if pixel_size is provided
+        if pixel_size is not None:
+            record['area_um2'] = area_px * (pixel_size ** 2)
+            record['perimeter_um'] = perimeter_px * pixel_size
+            record['equivalent_diameter_um'] = equiv_diameter_px * pixel_size
+            record['major_axis_length_um'] = major_axis_px * pixel_size
+            record['minor_axis_length_um'] = minor_axis_px * pixel_size
 
         records.append(record)
 

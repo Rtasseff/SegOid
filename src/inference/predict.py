@@ -15,6 +15,7 @@ from typing import Callable, Dict, Optional, Tuple, Union
 
 import numpy as np
 from scipy import ndimage
+from skimage.transform import rescale, resize
 
 # Use PIL as primary for reading (better Windows compatibility), tifffile for writing
 try:
@@ -41,6 +42,9 @@ logger = logging.getLogger(__name__)
 
 # Type alias for log callback: (message, level) -> None
 LogCallback = Optional[Callable[[str, str], None]]
+
+# Default training pixel size for backward compatibility with old checkpoints
+DEFAULT_TRAINING_PIXEL_SIZE = 2.76  # µm/pixel
 
 
 def _log(msg: str, level: str = "INFO", callback: LogCallback = None):
@@ -253,7 +257,7 @@ def load_model_from_checkpoint(
     checkpoint_path: Path,
     device=None,
     log_callback: LogCallback = None,
-):
+) -> Tuple:
     """
     Load trained model from checkpoint.
 
@@ -267,7 +271,9 @@ def load_model_from_checkpoint(
         log_callback: Optional callback for logging
 
     Returns:
-        Loaded model in eval mode
+        Tuple of (model, training_pixel_size) where:
+        - model: Loaded model in eval mode
+        - training_pixel_size: Pixel size in µm used during training
     """
     torch = _get_torch()
     smp = _get_smp()
@@ -307,10 +313,14 @@ def load_model_from_checkpoint(
     model = model.to(device)
     model.eval()
 
+    # Extract training_pixel_size from model_config
+    training_pixel_size = model_config.get("training_pixel_size", DEFAULT_TRAINING_PIXEL_SIZE)
+
     epoch = checkpoint.get("epoch", "unknown")
     _log(f"Model loaded successfully (epoch {epoch})", "INFO", log_callback)
+    _log(f"Training pixel size: {training_pixel_size} µm/pixel", "INFO", log_callback)
 
-    return model
+    return model, training_pixel_size
 
 
 def predict_full_image(
@@ -552,17 +562,25 @@ def predict_image_from_path(
     overlap: float = 0.25,
     threshold: float = 0.5,
     min_object_area: int = 100,
+    pixel_size: Optional[float] = None,
+    training_pixel_size: float = DEFAULT_TRAINING_PIXEL_SIZE,
 ) -> Dict[str, float]:
     """
-    Run full inference pipeline on a single image.
+    Run full inference pipeline on a single image (legacy PyTorch-only function).
+
+    Supports multi-resolution inference: if pixel_size is provided and differs
+    from training_pixel_size, the image is automatically rescaled to match the
+    training resolution before inference, then results are rescaled back.
 
     Steps:
     1. Load image
-    2. Perform tiled inference
-    3. Threshold probability map
-    4. Apply post-processing
-    5. Save outputs (probability map and binary mask)
-    6. Compute metrics if ground truth is provided
+    2. Optionally rescale to training resolution
+    3. Perform tiled inference
+    4. Optionally rescale probability map back to original resolution
+    5. Threshold probability map
+    6. Apply post-processing
+    7. Save outputs (probability map and binary mask)
+    8. Compute metrics if ground truth is provided
 
     Args:
         image_path: Path to input image
@@ -573,7 +591,9 @@ def predict_image_from_path(
         tile_size: Tile size for sliding window
         overlap: Overlap fraction between tiles
         threshold: Threshold for binarization
-        min_object_area: Minimum object area for post-processing
+        min_object_area: Minimum object area for post-processing (in pixels at training resolution)
+        pixel_size: Pixel size of input image in µm/pixel (None = no rescaling)
+        training_pixel_size: Pixel size model was trained at in µm/pixel (default: 2.76)
 
     Returns:
         Dictionary with metrics (Dice, IoU) if mask_path provided, else empty dict
@@ -589,6 +609,38 @@ def predict_image_from_path(
         image = image.mean(axis=2).astype(np.uint8)
         logger.debug(f"Converted RGB to grayscale")
 
+    # Store original dimensions
+    original_shape = image.shape
+    H_orig, W_orig = original_shape
+
+    # Calculate scale factor and rescale if needed
+    scale_factor = 1.0
+    rescale_applied = False
+
+    if pixel_size is not None and abs(pixel_size - training_pixel_size) > 1e-6:
+        scale_factor = training_pixel_size / pixel_size
+        rescale_applied = True
+
+        # Calculate scaled dimensions
+        H_scaled = int(H_orig * scale_factor)
+        W_scaled = int(W_orig * scale_factor)
+
+        logger.info(
+            f"Rescaling from {H_orig}×{W_orig} to {H_scaled}×{W_scaled} "
+            f"(pixel size {pixel_size:.2f} µm → {training_pixel_size:.2f} µm, scale={scale_factor:.2f}x)"
+        )
+
+        # Rescale image
+        image = rescale(
+            image,
+            scale_factor,
+            order=1,  # Bilinear interpolation
+            anti_aliasing=(scale_factor < 1.0),
+            preserve_range=True,
+        ).astype(image.dtype)
+    else:
+        logger.info("No rescaling (input matches training resolution)")
+
     # Perform tiled inference
     prob_map = predict_full_image(
         image=image,
@@ -598,13 +650,31 @@ def predict_image_from_path(
         overlap=overlap,
     )
 
+    # Rescale probability map back to original resolution if rescaling was applied
+    if rescale_applied:
+        logger.info(f"Rescaling probability map back to {H_orig}×{W_orig}")
+        prob_map = resize(
+            prob_map,
+            (H_orig, W_orig),
+            order=1,  # Bilinear interpolation
+            preserve_range=True,
+            anti_aliasing=False,
+        )
+
+    # Calculate effective min_object_area (scale to original resolution)
+    if rescale_applied:
+        effective_min_area = int(min_object_area / (scale_factor ** 2))
+        logger.info(f"Scaling min_object_area: {min_object_area} → {effective_min_area} pixels")
+    else:
+        effective_min_area = min_object_area
+
     # Threshold to binary mask
     binary_mask = threshold_mask(prob_map, threshold=threshold)
 
     # Post-process
     cleaned_mask = postprocess_mask(
         binary_mask,
-        min_object_area=min_object_area,
+        min_object_area=effective_min_area,
         fill_holes=True,
     )
 
@@ -662,6 +732,8 @@ def predict_single_image(
     threshold: float = 0.5,
     min_object_area: int = 100,
     save_prob_map: bool = False,
+    pixel_size: Optional[float] = None,
+    training_pixel_size: float = DEFAULT_TRAINING_PIXEL_SIZE,
     log_callback: LogCallback = None,
 ) -> Optional[Path]:
     """
@@ -669,6 +741,10 @@ def predict_single_image(
 
     This is the unified inference function that handles both backends,
     includes graceful error handling, and supports logging callbacks.
+
+    Supports multi-resolution inference: if pixel_size is provided and differs
+    from training_pixel_size, the image is automatically rescaled to match the
+    training resolution before inference, then results are rescaled back.
 
     Args:
         image_path: Path to input image
@@ -678,8 +754,10 @@ def predict_single_image(
         tile_size: Tile size for sliding window
         overlap: Overlap fraction between tiles
         threshold: Probability threshold for binarization
-        min_object_area: Minimum object area for post-processing
+        min_object_area: Minimum object area for post-processing (in pixels at training resolution)
         save_prob_map: Whether to save probability map (default: False)
+        pixel_size: Pixel size of input image in µm/pixel (None = no rescaling)
+        training_pixel_size: Pixel size model was trained at in µm/pixel (default: 2.76)
         log_callback: Optional callback for logging progress
 
     Returns:
@@ -703,6 +781,41 @@ def predict_single_image(
         if image.ndim == 3:
             image = image.mean(axis=2).astype(np.uint8)
 
+        # Store original dimensions
+        original_shape = image.shape
+        H_orig, W_orig = original_shape
+
+        # Calculate scale factor and rescale if needed
+        scale_factor = 1.0
+        rescale_applied = False
+
+        if pixel_size is not None and abs(pixel_size - training_pixel_size) > 1e-6:
+            scale_factor = training_pixel_size / pixel_size
+            rescale_applied = True
+
+            # Calculate scaled dimensions
+            H_scaled = int(H_orig * scale_factor)
+            W_scaled = int(W_orig * scale_factor)
+
+            _log(
+                f"Rescaling from {H_orig}×{W_orig} to {H_scaled}×{W_scaled} "
+                f"(pixel size {pixel_size:.2f} µm → {training_pixel_size:.2f} µm, scale={scale_factor:.2f}x)",
+                "INFO",
+                log_callback,
+            )
+
+            # Rescale image
+            # Use anti_aliasing for downsampling, no anti_aliasing for upsampling
+            image = rescale(
+                image,
+                scale_factor,
+                order=1,  # Bilinear interpolation
+                anti_aliasing=(scale_factor < 1.0),
+                preserve_range=True,
+            ).astype(image.dtype)
+        else:
+            _log("No rescaling (input matches training resolution)", "INFO", log_callback)
+
         # Determine backend and run inference
         if isinstance(model, ONNXModel):
             prob_map = predict_full_image_onnx(
@@ -721,11 +834,33 @@ def predict_single_image(
                 overlap=overlap,
             )
 
+        # Rescale probability map back to original resolution if rescaling was applied
+        if rescale_applied:
+            _log(f"Rescaling probability map back to {H_orig}×{W_orig}", "INFO", log_callback)
+            prob_map = resize(
+                prob_map,
+                (H_orig, W_orig),
+                order=1,  # Bilinear interpolation
+                preserve_range=True,
+                anti_aliasing=False,
+            )
+
+        # Calculate effective min_object_area (scale to original resolution)
+        if rescale_applied:
+            effective_min_area = int(min_object_area / (scale_factor ** 2))
+            _log(
+                f"Scaling min_object_area: {min_object_area} → {effective_min_area} pixels",
+                "INFO",
+                log_callback,
+            )
+        else:
+            effective_min_area = min_object_area
+
         # Threshold and post-process
         binary_mask = threshold_mask(prob_map, threshold=threshold)
         cleaned_mask = postprocess_mask(
             binary_mask,
-            min_object_area=min_object_area,
+            min_object_area=effective_min_area,
             fill_holes=True,
         )
 
@@ -758,10 +893,15 @@ def run_inference_batch(
     threshold: float = 0.5,
     min_object_area: int = 100,
     save_prob_map: bool = False,
+    pixel_size: Optional[float] = None,
+    training_pixel_size: float = DEFAULT_TRAINING_PIXEL_SIZE,
     log_callback: LogCallback = None,
 ) -> Tuple[int, int, list]:
     """
     Run inference on a batch of images.
+
+    Supports multi-resolution inference: if pixel_size is provided and differs
+    from training_pixel_size, images are automatically rescaled.
 
     Args:
         image_paths: List of image paths to process
@@ -773,6 +913,8 @@ def run_inference_batch(
         threshold: Probability threshold
         min_object_area: Minimum object area
         save_prob_map: Whether to save probability maps
+        pixel_size: Pixel size of input images in µm/pixel (None = no rescaling)
+        training_pixel_size: Pixel size model was trained at (default: 2.76)
         log_callback: Optional callback for logging
 
     Returns:
@@ -800,6 +942,8 @@ def run_inference_batch(
             threshold=threshold,
             min_object_area=min_object_area,
             save_prob_map=save_prob_map,
+            pixel_size=pixel_size,
+            training_pixel_size=training_pixel_size,
             log_callback=log_callback,
         )
 

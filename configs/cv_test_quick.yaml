@@ -21,6 +21,7 @@ model:
   encoder_weights: imagenet
   in_channels: 1
   classes: 1
+  training_pixel_size: 2.76  # Pixel size in µm used during training
 
 training:
   epochs: 2  # Minimal epochs for quick test

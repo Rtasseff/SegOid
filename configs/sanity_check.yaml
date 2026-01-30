@@ -35,6 +35,7 @@ model:
   encoder_weights: imagenet
   in_channels: 1  # Grayscale input
   classes: 1  # Binary segmentation
+  training_pixel_size: 2.76  # Pixel size in µm used during training (for multi-resolution inference)
 
 # Training parameters
 training:

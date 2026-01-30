@@ -15,6 +15,9 @@ import segmentation_models_pytorch as smp
 
 logger = logging.getLogger(__name__)
 
+# Default training pixel size for backward compatibility with old checkpoints
+DEFAULT_TRAINING_PIXEL_SIZE = 2.76  # µm/pixel
+
 # Default model config for backward compatibility with old checkpoints
 DEFAULT_MODEL_CONFIG = {
     "encoder_name": "resnet18",
@@ -26,7 +29,7 @@ DEFAULT_MODEL_CONFIG = {
 def load_pytorch_model(
     checkpoint_path: Path,
     device: torch.device = torch.device("cpu"),
-) -> torch.nn.Module:
+) -> Tuple[torch.nn.Module, float]:
     """
     Load a trained PyTorch model from checkpoint.
 
@@ -39,7 +42,9 @@ def load_pytorch_model(
         device: Device to load model onto
 
     Returns:
-        Loaded model in eval mode
+        Tuple of (model, training_pixel_size) where:
+        - model: Loaded model in eval mode
+        - training_pixel_size: Pixel size in µm used during training
     """
     logger.info(f"Loading PyTorch model from {checkpoint_path}")
 
@@ -69,10 +74,14 @@ def load_pytorch_model(
     model = model.to(device)
     model.eval()
 
+    # Extract training_pixel_size from model_config
+    training_pixel_size = model_config.get("training_pixel_size", DEFAULT_TRAINING_PIXEL_SIZE)
+
     epoch = checkpoint.get("epoch", "unknown")
     logger.info(f"Model loaded successfully (epoch {epoch})")
+    logger.info(f"Training pixel size: {training_pixel_size} µm/pixel")
 
-    return model
+    return model, training_pixel_size
 
 
 def export_to_onnx(
@@ -106,7 +115,7 @@ def export_to_onnx(
 
     # Load model
     device = torch.device("cpu")  # Export on CPU for compatibility
-    model = load_pytorch_model(checkpoint_path, device)
+    model, training_pixel_size = load_pytorch_model(checkpoint_path, device)
 
     # Create dummy input for tracing
     # Shape: [batch, channels, height, width]
@@ -176,7 +185,7 @@ def validate_onnx_export(
 
     # Load PyTorch model
     device = torch.device("cpu")
-    pytorch_model = load_pytorch_model(checkpoint_path, device)
+    pytorch_model, _ = load_pytorch_model(checkpoint_path, device)  # Ignore training_pixel_size for validation
 
     # Create test input
     test_input = torch.randn(1, 1, input_size[0], input_size[1], device=device)
