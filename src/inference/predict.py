@@ -16,6 +16,7 @@ from typing import Callable, Dict, Optional, Tuple, Union
 import numpy as np
 from scipy import ndimage
 from skimage.transform import rescale, resize
+from skimage.exposure import match_histograms
 
 # Use PIL as primary for reading (better Windows compatibility), tifffile for writing
 try:
@@ -52,6 +53,71 @@ def _log(msg: str, level: str = "INFO", callback: LogCallback = None):
     logger.log(getattr(logging, level), msg)
     if callback:
         callback(msg, level)
+
+
+def load_histogram_reference(reference_path: Path) -> np.ndarray:
+    """
+    Load a reference image for histogram matching.
+
+    The reference image should be representative of the training data
+    intensity distribution. The loaded image is converted to grayscale
+    if necessary.
+
+    Args:
+        reference_path: Path to reference image file
+
+    Returns:
+        Grayscale reference image as numpy array (uint8)
+    """
+    reference_path = Path(reference_path)
+    if not reference_path.exists():
+        raise FileNotFoundError(f"Histogram reference image not found: {reference_path}")
+
+    ref_image = imread(reference_path)
+
+    # Convert to grayscale if RGB
+    if ref_image.ndim == 3:
+        ref_image = ref_image.mean(axis=2).astype(np.uint8)
+
+    logger.info(f"Loaded histogram reference: {reference_path.name} (shape={ref_image.shape}, mean={ref_image.mean():.1f})")
+
+    return ref_image
+
+
+def apply_histogram_matching(
+    image: np.ndarray,
+    reference: np.ndarray,
+    log_callback: LogCallback = None,
+) -> np.ndarray:
+    """
+    Apply histogram matching to transform image intensity distribution.
+
+    This preprocessing step can help when inference images have different
+    intensity characteristics than the training data (e.g., different
+    microscopy settings, lighting conditions).
+
+    Args:
+        image: Input grayscale image to transform
+        reference: Reference image with target intensity distribution
+        log_callback: Optional callback for logging
+
+    Returns:
+        Histogram-matched image with same dtype as input
+    """
+    original_dtype = image.dtype
+    original_mean = image.mean()
+
+    # Apply histogram matching
+    matched = match_histograms(image, reference)
+    matched = matched.astype(original_dtype)
+
+    _log(
+        f"Applied histogram matching: mean {original_mean:.1f} → {matched.mean():.1f}",
+        "INFO",
+        log_callback,
+    )
+
+    return matched
 
 
 # ============================================================================
@@ -564,6 +630,7 @@ def predict_image_from_path(
     min_object_area: int = 100,
     pixel_size: Optional[float] = None,
     training_pixel_size: float = DEFAULT_TRAINING_PIXEL_SIZE,
+    histogram_reference: Optional[np.ndarray] = None,
 ) -> Dict[str, float]:
     """
     Run full inference pipeline on a single image (legacy PyTorch-only function).
@@ -572,15 +639,20 @@ def predict_image_from_path(
     from training_pixel_size, the image is automatically rescaled to match the
     training resolution before inference, then results are rescaled back.
 
+    Supports histogram matching: if histogram_reference is provided, the input
+    image intensity distribution is transformed to match the reference before
+    inference.
+
     Steps:
     1. Load image
-    2. Optionally rescale to training resolution
-    3. Perform tiled inference
-    4. Optionally rescale probability map back to original resolution
-    5. Threshold probability map
-    6. Apply post-processing
-    7. Save outputs (probability map and binary mask)
-    8. Compute metrics if ground truth is provided
+    2. Optionally apply histogram matching
+    3. Optionally rescale to training resolution
+    4. Perform tiled inference
+    5. Optionally rescale probability map back to original resolution
+    6. Threshold probability map
+    7. Apply post-processing
+    8. Save outputs (probability map and binary mask)
+    9. Compute metrics if ground truth is provided
 
     Args:
         image_path: Path to input image
@@ -594,6 +666,7 @@ def predict_image_from_path(
         min_object_area: Minimum object area for post-processing (in pixels at training resolution)
         pixel_size: Pixel size of input image in µm/pixel (None = no rescaling)
         training_pixel_size: Pixel size model was trained at in µm/pixel (default: 2.76)
+        histogram_reference: Reference image for histogram matching (None = no matching)
 
     Returns:
         Dictionary with metrics (Dice, IoU) if mask_path provided, else empty dict
@@ -608,6 +681,10 @@ def predict_image_from_path(
         # Average across channels
         image = image.mean(axis=2).astype(np.uint8)
         logger.debug(f"Converted RGB to grayscale")
+
+    # Apply histogram matching if reference provided
+    if histogram_reference is not None:
+        image = apply_histogram_matching(image, histogram_reference)
 
     # Store original dimensions
     original_shape = image.shape
@@ -734,6 +811,7 @@ def predict_single_image(
     save_prob_map: bool = False,
     pixel_size: Optional[float] = None,
     training_pixel_size: float = DEFAULT_TRAINING_PIXEL_SIZE,
+    histogram_reference: Optional[np.ndarray] = None,
     log_callback: LogCallback = None,
 ) -> Optional[Path]:
     """
@@ -745,6 +823,11 @@ def predict_single_image(
     Supports multi-resolution inference: if pixel_size is provided and differs
     from training_pixel_size, the image is automatically rescaled to match the
     training resolution before inference, then results are rescaled back.
+
+    Supports histogram matching: if histogram_reference is provided, the input
+    image intensity distribution is transformed to match the reference before
+    inference. This can help when images have different intensity characteristics
+    than the training data.
 
     Args:
         image_path: Path to input image
@@ -758,6 +841,7 @@ def predict_single_image(
         save_prob_map: Whether to save probability map (default: False)
         pixel_size: Pixel size of input image in µm/pixel (None = no rescaling)
         training_pixel_size: Pixel size model was trained at in µm/pixel (default: 2.76)
+        histogram_reference: Reference image for histogram matching (None = no matching)
         log_callback: Optional callback for logging progress
 
     Returns:
@@ -780,6 +864,10 @@ def predict_single_image(
         # Convert RGB to grayscale if needed
         if image.ndim == 3:
             image = image.mean(axis=2).astype(np.uint8)
+
+        # Apply histogram matching if reference provided
+        if histogram_reference is not None:
+            image = apply_histogram_matching(image, histogram_reference, log_callback)
 
         # Store original dimensions
         original_shape = image.shape
@@ -895,6 +983,7 @@ def run_inference_batch(
     save_prob_map: bool = False,
     pixel_size: Optional[float] = None,
     training_pixel_size: float = DEFAULT_TRAINING_PIXEL_SIZE,
+    histogram_reference: Optional[np.ndarray] = None,
     log_callback: LogCallback = None,
 ) -> Tuple[int, int, list]:
     """
@@ -902,6 +991,9 @@ def run_inference_batch(
 
     Supports multi-resolution inference: if pixel_size is provided and differs
     from training_pixel_size, images are automatically rescaled.
+
+    Supports histogram matching: if histogram_reference is provided, input images
+    are transformed to match the reference intensity distribution before inference.
 
     Args:
         image_paths: List of image paths to process
@@ -915,6 +1007,7 @@ def run_inference_batch(
         save_prob_map: Whether to save probability maps
         pixel_size: Pixel size of input images in µm/pixel (None = no rescaling)
         training_pixel_size: Pixel size model was trained at (default: 2.76)
+        histogram_reference: Reference image for histogram matching (None = no matching)
         log_callback: Optional callback for logging
 
     Returns:
@@ -944,6 +1037,7 @@ def run_inference_batch(
             save_prob_map=save_prob_map,
             pixel_size=pixel_size,
             training_pixel_size=training_pixel_size,
+            histogram_reference=histogram_reference,
             log_callback=log_callback,
         )
 

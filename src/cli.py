@@ -553,6 +553,14 @@ def predict_full():
         help="Pixel size of input images in µm/pixel. Images will be rescaled to match "
              "training resolution (stored in checkpoint). Omit for images already at training resolution.",
     )
+    parser.add_argument(
+        "--histogram-match",
+        type=str,
+        metavar="REFERENCE_IMAGE",
+        help="Path to reference image for histogram matching. Use when input images have "
+             "different intensity characteristics than training data (e.g., different "
+             "microscopy settings). The reference should be representative of training data.",
+    )
     args = parser.parse_args()
 
     try:
@@ -561,6 +569,7 @@ def predict_full():
 
         from src.inference.predict import (
             load_model_from_checkpoint,
+            load_histogram_reference,
             predict_image_from_path,
         )
 
@@ -584,6 +593,8 @@ def predict_full():
         print(f"  Min object area: {args.min_object_area} px")
         if args.pixel_size is not None:
             print(f"  Input pixel size: {args.pixel_size} µm/px (rescaling enabled)")
+        if args.histogram_match:
+            print(f"  Histogram matching: {args.histogram_match}")
 
         # Verify checkpoint exists
         if not checkpoint_path.exists():
@@ -608,6 +619,12 @@ def predict_full():
         print("\nLoading model...")
         model, training_pixel_size = load_model_from_checkpoint(checkpoint_path, device)
         print(f"  Training pixel size: {training_pixel_size} µm/px")
+
+        # Load histogram reference if provided
+        histogram_reference = None
+        if args.histogram_match:
+            print(f"\nLoading histogram reference: {args.histogram_match}")
+            histogram_reference = load_histogram_reference(Path(args.histogram_match))
 
         # Load manifest
         print("\nLoading manifest...")
@@ -636,6 +653,7 @@ def predict_full():
                 min_object_area=args.min_object_area,
                 pixel_size=args.pixel_size,
                 training_pixel_size=training_pixel_size,
+                histogram_reference=histogram_reference,
             )
 
             if metrics:  # If ground truth was available

@@ -183,9 +183,22 @@ predict_full \
 3. Probability map is rescaled back to original resolution
 4. Output masks are at your original image resolution
 
-**Performance benefits:**
-- High-resolution images (e.g., 1.1 µm/px) are downsampled → **faster inference**
-- Example: 4000×4000 image → rescaled to ~1594×1594 → ~6× fewer tiles
+**Important: Resolution is not preserved.** All inference is performed at the training resolution (2.76 µm/px). Higher-resolution input images (e.g., 1.1 µm/px) are downsampled before the model sees them. The output mask is upsampled back to the original image dimensions, but the segmentation detail is limited to what 2.76 µm/px can resolve. To segment at finer resolution would require retraining with larger tile sizes or a different architecture — see [Multi-Scale Training](#multi-scale-training) below.
+
+**Histogram Matching:**
+
+If images at a different magnification also have different intensity characteristics (e.g., darker background, different contrast due to microscopy settings), the model may produce poor results even with rescaling. Use `--histogram-match` to transform input intensities to match a reference image representative of the training data:
+
+```bash
+predict_full \
+    --checkpoint runs/train_20251229_194116/checkpoints/best_model.pth \
+    --manifest high_mag_images.csv \
+    --output-dir inference/high_mag/ \
+    --pixel-size 1.1 \
+    --histogram-match path/to/training_reference_image.tif
+```
+
+The reference image should be a typical image from the training set (e.g., one of the original 2.76 µm/px images).
 
 **Quality Guidelines:**
 
@@ -197,12 +210,20 @@ predict_full \
 | <0.9 or >9.2 µm/px | <0.3 or >3.0× | ✗ Poor | Retrain at target resolution |
 
 **Limitations:**
+- **No enhanced resolution**: High-magnification input is downsampled to 2.76 µm/px for inference — finer detail is discarded
 - **Very high magnification (<0.3× scale)**: Model sees overly magnified texture, loses whole-spheroid context
 - **Very low magnification (>3.0× scale)**: Model sees blurry, undersampled spheroids, loses fine details
 - **Memory**: Peak usage ~2.5× original image size during processing
 - **Interpolation artifacts**: 1-2 pixel smoothing at boundaries (acceptable for most use cases)
+- **Intensity mismatch**: Different magnifications often have different brightness/contrast — use `--histogram-match` if results are poor
 
-For regular processing at extreme magnifications, consider retraining the model at that target resolution.
+### Multi-Scale Training
+
+The current model is trained at a single resolution (2.76 µm/px). To train a model that handles multiple input resolutions simultaneously:
+
+**Approach:** Rescale all training images to a common pixel size before patch extraction. Add a `pixel_size` column to the training manifest so each image is rescaled to the target training resolution during dataset loading. The architecture (256×256 U-Net tiles) stays the same — only the data preparation changes. This means the model learns from images captured at different magnifications but always sees them at a consistent physical scale.
+
+**What this does not do:** Preserve fine detail from higher-resolution inputs. A 1.1 µm/px image is downsampled to 2.76 µm/px for both training and inference. Segmenting at 1.1 µm/px resolution would require larger tiles (e.g., 640×640 to cover the same physical area) or architectural changes, increasing GPU memory and training time.
 
 ---
 

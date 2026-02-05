@@ -39,6 +39,7 @@ class InferenceJob:
         export_video: bool = False,
         filename_schema: Optional[dict] = None,
         pixel_size: Optional[float] = None,
+        histogram_reference_path: Optional[str] = None,
     ):
         """
         Initialize inference job.
@@ -53,6 +54,7 @@ class InferenceJob:
             export_video: Whether to export review video
             filename_schema: Optional dict with 'labels' for filename parsing
             pixel_size: Optional pixel size in µm/pixel for scaling metrics
+            histogram_reference_path: Optional path to reference image for histogram matching
         """
         self.input_folder = Path(input_folder)
         self.output_folder = Path(output_folder)
@@ -63,6 +65,7 @@ class InferenceJob:
         self.export_video = export_video
         self.filename_schema = filename_schema
         self.pixel_size = pixel_size
+        self.histogram_reference_path = Path(histogram_reference_path) if histogram_reference_path else None
 
         self._thread: Optional[threading.Thread] = None
         self._cancelled = False
@@ -120,9 +123,22 @@ class InferenceJob:
                 self._complete(False, "Job cancelled")
                 return
 
+            # Step 2b: Load histogram reference if provided
+            histogram_reference = None
+            if self.histogram_reference_path:
+                self._log(f"Loading histogram reference: {self.histogram_reference_path.name}")
+                histogram_reference = self._load_histogram_reference()
+                if histogram_reference is None:
+                    self._complete(False, "Failed to load histogram reference image")
+                    return
+
+            if self._cancelled:
+                self._complete(False, "Job cancelled")
+                return
+
             # Step 3: Run inference
             self._log("Running inference...")
-            successful, failed, output_paths = self._run_inference(image_paths, model)
+            successful, failed, output_paths = self._run_inference(image_paths, model, histogram_reference)
 
             self._log(f"Inference complete: {successful} successful, {failed} failed")
 
@@ -167,7 +183,17 @@ class InferenceJob:
             self._log(f"Failed to load model: {e}", "ERROR")
             return None
 
-    def _run_inference(self, image_paths: List[Path], model) -> tuple:
+    def _load_histogram_reference(self):
+        """Load the histogram reference image."""
+        try:
+            from src.inference.predict import load_histogram_reference
+
+            return load_histogram_reference(self.histogram_reference_path)
+        except Exception as e:
+            self._log(f"Failed to load histogram reference: {e}", "ERROR")
+            return None
+
+    def _run_inference(self, image_paths: List[Path], model, histogram_reference=None) -> tuple:
         """Run inference on all images."""
         from src.inference.predict import run_inference_batch
 
@@ -176,6 +202,7 @@ class InferenceJob:
             model=model,
             output_dir=self.output_folder,
             pixel_size=self.pixel_size,  # For multi-resolution inference
+            histogram_reference=histogram_reference,
             log_callback=self.log_callback,
         )
 

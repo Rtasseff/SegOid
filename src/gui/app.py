@@ -148,6 +148,35 @@ class SegOidApp:
             foreground="gray",
         ).pack(anchor=tk.W, pady=(2, 0))
 
+        # Histogram matching option
+        histogram_row = ttk.Frame(inference_frame)
+        histogram_row.pack(fill=tk.X, pady=(10, 0))
+
+        self.use_histogram_match = tk.BooleanVar(value=False)
+        self.histogram_check = ttk.Checkbutton(
+            histogram_row,
+            text="Apply histogram matching",
+            variable=self.use_histogram_match,
+            command=self._on_histogram_toggle,
+        )
+        self.histogram_check.pack(anchor=tk.W)
+
+        self.histogram_picker = FilePicker(
+            inference_frame,
+            label="Reference image:",
+            filetypes=[("TIFF images", "*.tif *.tiff"), ("All images", "*.png *.jpg *.tif *.tiff"), ("All files", "*.*")],
+        )
+        self.histogram_picker.pack(fill=tk.X, pady=(5, 0))
+        self.histogram_picker.entry.config(state=tk.DISABLED)
+        self.histogram_picker.browse_btn.config(state=tk.DISABLED)
+
+        ttk.Label(
+            inference_frame,
+            text="Use when images have different intensity than training data (e.g., different microscopy settings).",
+            font=("TkDefaultFont", 8),
+            foreground="gray",
+        ).pack(anchor=tk.W, pady=(2, 0))
+
         # Options section
         options_frame = ttk.LabelFrame(main_frame, text="Options", padding=10)
         options_frame.pack(fill=tk.X, pady=5)
@@ -274,6 +303,15 @@ class SegOidApp:
             self.model_picker.entry.config(state=tk.DISABLED)
             self.model_picker.browse_btn.config(state=tk.DISABLED)
 
+    def _on_histogram_toggle(self):
+        """Handle histogram matching checkbox toggle."""
+        if self.use_histogram_match.get():
+            self.histogram_picker.entry.config(state=tk.NORMAL)
+            self.histogram_picker.browse_btn.config(state=tk.NORMAL)
+        else:
+            self.histogram_picker.entry.config(state=tk.DISABLED)
+            self.histogram_picker.browse_btn.config(state=tk.DISABLED)
+
     def _on_parse_toggle(self, enabled: bool):
         """Handle filename parsing toggle."""
         if enabled:
@@ -375,6 +413,18 @@ class SegOidApp:
         # Use inference pixel size for both inference rescaling and metrics if available
         pixel_size = inference_pixel_size if inference_pixel_size is not None else metrics_pixel_size
 
+        # Get histogram reference path if enabled
+        histogram_reference_path = None
+        if self.use_histogram_match.get():
+            ref_path = self.histogram_picker.get()
+            if ref_path and Path(ref_path).exists():
+                histogram_reference_path = ref_path
+            else:
+                messagebox.showerror("Error", "Please select a valid reference image for histogram matching.")
+                self.run_btn.config(state=tk.NORMAL)
+                self.cancel_btn.config(state=tk.DISABLED)
+                return
+
         # Create and start job
         self.current_job = InferenceJob(
             input_folder=self.input_picker.get(),
@@ -386,6 +436,7 @@ class SegOidApp:
             export_video=self.export_video.get(),
             filename_schema=filename_schema,
             pixel_size=pixel_size,  # Used for both inference rescaling and metrics
+            histogram_reference_path=histogram_reference_path,
         )
         self.current_job.start()
 
