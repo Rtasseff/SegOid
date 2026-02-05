@@ -70,9 +70,75 @@ if pixel_size is not None and abs(pixel_size - self.training_pixel_size) > 1e-6:
 
 **When rescaling happens:** At dataset initialization (`_load_images`), not per-patch. Since all images are preloaded into memory, rescaling once at load time is efficient.
 
-#### No changes to `__getitem__`
+#### Area-Proportional Patch Sampling
 
-Patch extraction, augmentation, and normalization remain the same. By the time patches are sampled, all images are already at the common resolution.
+**Problem:** After rescaling to 2.76 µm/px, 1.1 µm/px images are still ~4× the pixel area of the original images (larger physical field of view). With a flat `patches_per_image: 30`, the larger images are sampled at 1/4 the density — fewer patches per spheroid and less exposure to their spatial diversity.
+
+**Solution:** Scale `patches_per_image` proportionally to each image's area after rescaling.
+
+```python
+# In _load_images(), after rescaling, compute per-image patch count
+base_patches = self.patches_per_image          # e.g. 30
+base_area = np.mean(image_areas_at_train_res)  # mean area of training-resolution images
+                                                # (computed after all images are loaded/rescaled)
+scale = this_image_area / base_area
+patches_this_image = int(round(base_patches * scale))
+
+# Cap to prevent one huge image from dominating an epoch
+patches_this_image = min(patches_this_image, self.max_patches_per_image)
+```
+
+**Implementation detail — two-pass loading:** Since `base_area` requires knowing all image sizes after rescaling, `_load_images()` becomes a two-pass process:
+1. Load and rescale all images/masks (existing logic + new rescaling)
+2. Compute `base_area` as the mean area, then compute `self._patches_per_image_list` for each image
+
+**Structural changes to `__len__` and `__getitem__`:**
+
+The current implementation uses flat integer division to map patch index → image index:
+```python
+# Current (fixed patches per image)
+def __len__(self):
+    return len(self.manifest) * self.patches_per_image
+
+def __getitem__(self, idx):
+    image_idx = idx // self.patches_per_image
+```
+
+This must change to cumulative-sum index mapping:
+```python
+# New (variable patches per image)
+def __init__(self, ...):
+    # After _load_images():
+    self._cumulative_patches = np.cumsum(self._patches_per_image_list)
+
+def __len__(self):
+    return int(self._cumulative_patches[-1])
+
+def __getitem__(self, idx):
+    image_idx = int(np.searchsorted(self._cumulative_patches, idx, side='right'))
+```
+
+**Config parameter:**
+
+```yaml
+dataset:
+  patches_per_image: 30          # Base count (for reference-sized images)
+  max_patches_per_image: 120     # Cap (default: 4× base)
+```
+
+#### Dead-Patch Rejection
+
+The 1.1 µm/px images capture the full well including black borders. After rescaling, proportionally more of the image is empty black background. The `positive_ratio: 0.7` mechanism forces 70% of patches onto foreground, but the remaining 30% "negative" patches will hit dead black border more often in these larger images.
+
+**Addition to `_sample_negative_patch()`:** Before accepting a negative patch, reject patches that are >95% zero-valued (dead background with no useful texture):
+
+```python
+# Inside the sampling loop, after extracting image_patch:
+if np.mean(image_patch == 0) > 0.95:
+    continue  # Skip dead patches, try another location
+```
+
+This is cheap (one comparison per candidate patch) and avoids training on pure-black tiles that add no information. The existing `max_attempts: 50` loop naturally bounds the cost.
 
 ### 3. Training Config Changes
 
@@ -81,9 +147,10 @@ Add `training_pixel_size` to the dataset section (it's already in the model sect
 ```yaml
 dataset:
   patch_size: 256
-  patches_per_image: 30
+  patches_per_image: 30           # Base count (for reference-sized images)
+  max_patches_per_image: 120      # Cap per image (default: 4× base)
   positive_ratio: 0.7
-  training_pixel_size: 2.76    # Target resolution for rescaling
+  training_pixel_size: 2.76       # Target resolution for rescaling
   # ... existing fields
 ```
 
@@ -140,7 +207,7 @@ Consider stratified splitting so each fold has images from both pixel sizes, rat
 
 | File | Change |
 |------|--------|
-| `src/data/dataset.py` | Add `training_pixel_size` param, rescale in `_load_images()` |
+| `src/data/dataset.py` | Add `training_pixel_size` param, rescale in `_load_images()`, area-proportional patch counts, cumulative-sum indexing in `__len__`/`__getitem__`, dead-patch rejection in `_sample_negative_patch()` |
 | `src/cli.py` | Pass `training_pixel_size` to PatchDataset in `train()` and `sanity_check()` |
 | `configs/production_train.yaml` | No change needed (already has `model.training_pixel_size`) |
 | Training manifest | Add `pixel_size` column |
@@ -159,10 +226,12 @@ Consider stratified splitting so each fold has images from both pixel sizes, rat
 2. Create combined training manifest with `pixel_size` column
 3. Modify `PatchDataset._load_images()` to rescale per-image
 4. Add `training_pixel_size` parameter to `PatchDataset.__init__`
-5. Update CLI to pass `training_pixel_size` to dataset
-6. Run sanity check with mixed-resolution manifest
-7. Full training run
-8. Evaluate on both resolutions (with and without `--pixel-size`)
+5. Implement area-proportional patch counts (two-pass `_load_images()`, cumulative-sum indexing)
+6. Add dead-patch rejection to `_sample_negative_patch()`
+7. Update CLI to pass `training_pixel_size` and `max_patches_per_image` to dataset
+8. Run sanity check with mixed-resolution manifest — verify patch counts per image are proportional
+9. Full training run
+10. Evaluate on both resolutions (with and without `--pixel-size`)
 
 ## Verification
 
