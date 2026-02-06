@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import tifffile
 import torch
+from skimage.transform import rescale
 from torch.utils.data import Dataset
 
 logger = logging.getLogger(__name__)
@@ -24,16 +25,21 @@ class PatchDataset(Dataset):
 
     Loads full images/masks from manifest and extracts patches on-the-fly.
     Supports positive-centered and negative sampling with configurable balance.
+    Supports multi-scale training by rescaling images to a common resolution.
 
     Args:
         manifest_csv: Path to CSV manifest (train.csv, val.csv, or test.csv)
         patch_size: Size of patches to extract (default: 256)
-        patches_per_image: Number of patches to sample per image per epoch (default: 20)
+        patches_per_image: Base number of patches per image (default: 20).
+            Actual count is scaled by image area relative to mean.
         positive_ratio: Fraction of positive-centered patches (default: 0.7)
         negative_threshold: Max mask coverage for negative patches (default: 0.05)
         max_jitter: Max jitter as fraction of patch size for positive patches (default: 0.25)
         augment: Whether to apply augmentations (default: True, ignored for val/test)
         data_root: Root directory for resolving relative paths in manifest
+        training_pixel_size: Target pixel size in µm/px for rescaling (default: 2.76).
+            Images with different pixel_size in manifest are rescaled to this.
+        max_patches_per_image: Cap on patches per image (default: None, meaning 4× base).
     """
 
     def __init__(
@@ -46,6 +52,8 @@ class PatchDataset(Dataset):
         max_jitter: float = 0.25,
         augment: bool = True,
         data_root: Optional[Path] = None,
+        training_pixel_size: float = 2.76,
+        max_patches_per_image: Optional[int] = None,
     ):
         self.patch_size = patch_size
         self.patches_per_image = patches_per_image
@@ -53,6 +61,8 @@ class PatchDataset(Dataset):
         self.negative_threshold = negative_threshold
         self.max_jitter = max_jitter
         self.augment = augment
+        self.training_pixel_size = training_pixel_size
+        self.max_patches_per_image = max_patches_per_image or (4 * patches_per_image)
 
         # Load manifest
         self.manifest = pd.read_csv(manifest_csv)
@@ -62,7 +72,7 @@ class PatchDataset(Dataset):
         logger.info(f"Data root: {self.data_root}")
         logger.info(
             f"Patch config: size={patch_size}, per_image={patches_per_image}, "
-            f"pos_ratio={positive_ratio}"
+            f"pos_ratio={positive_ratio}, training_pixel_size={training_pixel_size}"
         )
 
         # Preload all images and masks into memory (small dataset)
@@ -72,10 +82,21 @@ class PatchDataset(Dataset):
         self.transform = self._build_transforms() if augment else None
 
     def _load_images(self) -> None:
-        """Preload all images and masks into memory."""
+        """
+        Preload all images and masks into memory.
+
+        Two-pass process:
+        1. Load and rescale all images/masks based on per-image pixel_size
+        2. Compute area-proportional patch counts per image
+        """
         self.images: List[np.ndarray] = []
         self.masks: List[np.ndarray] = []
+        image_areas: List[int] = []
 
+        # Check if manifest has pixel_size column
+        has_pixel_size = "pixel_size" in self.manifest.columns
+
+        # Pass 1: Load and rescale images
         for idx, row in self.manifest.iterrows():
             # Resolve paths
             image_path = self.data_root / row["image_path"]
@@ -96,10 +117,62 @@ class PatchDataset(Dataset):
             assert image.shape[:2] == mask.shape[:2], \
                 f"Shape mismatch: {image.shape} vs {mask.shape} for {row['basename']}"
 
+            # Rescale if pixel_size differs from training_pixel_size
+            if has_pixel_size and pd.notna(row.get("pixel_size")):
+                pixel_size = float(row["pixel_size"])
+                if abs(pixel_size - self.training_pixel_size) > 1e-6:
+                    scale_factor = pixel_size / self.training_pixel_size
+
+                    logger.debug(
+                        f"Rescaling {row['basename']}: {pixel_size} → {self.training_pixel_size} µm/px "
+                        f"(scale={scale_factor:.3f})"
+                    )
+
+                    # Rescale image (bilinear, anti-alias if downsampling)
+                    image = rescale(
+                        image,
+                        scale_factor,
+                        order=1,
+                        anti_aliasing=(scale_factor < 1.0),
+                        preserve_range=True,
+                    ).astype(image.dtype)
+
+                    # Rescale mask (nearest-neighbor to preserve binary values)
+                    mask = rescale(
+                        mask,
+                        scale_factor,
+                        order=0,
+                        anti_aliasing=False,
+                        preserve_range=True,
+                    ).astype(mask.dtype)
+
             self.images.append(image)
             self.masks.append(mask)
+            image_areas.append(image.shape[0] * image.shape[1])
 
-        logger.info(f"Preloaded {len(self.images)} image/mask pairs")
+        # Pass 2: Compute area-proportional patch counts
+        mean_area = np.mean(image_areas)
+        self._patches_per_image_list: List[int] = []
+
+        for area in image_areas:
+            scale = area / mean_area
+            patches = int(round(self.patches_per_image * scale))
+            patches = max(1, min(patches, self.max_patches_per_image))
+            self._patches_per_image_list.append(patches)
+
+        # Cumulative sum for index mapping in __getitem__
+        self._cumulative_patches = np.cumsum(self._patches_per_image_list)
+
+        total_patches = int(self._cumulative_patches[-1])
+        logger.info(
+            f"Preloaded {len(self.images)} image/mask pairs, "
+            f"total patches per epoch: {total_patches}"
+        )
+        if len(set(self._patches_per_image_list)) > 1:
+            logger.info(
+                f"Patches per image range: {min(self._patches_per_image_list)} - "
+                f"{max(self._patches_per_image_list)}"
+            )
 
     def _build_transforms(self) -> A.Compose:
         """Build albumentations augmentation pipeline."""
@@ -115,8 +188,8 @@ class PatchDataset(Dataset):
         ])
 
     def __len__(self) -> int:
-        """Total number of patches per epoch."""
-        return len(self.manifest) * self.patches_per_image
+        """Total number of patches per epoch (sum of per-image patch counts)."""
+        return int(self._cumulative_patches[-1])
 
     def _sample_positive_patch(
         self, image: np.ndarray, mask: np.ndarray
@@ -196,6 +269,10 @@ class PatchDataset(Dataset):
             if coverage < self.negative_threshold:
                 image_patch = image[y1:y2, x1:x2]
 
+                # Skip dead patches (>95% zero-valued black background)
+                if np.mean(image_patch == 0) > 0.95:
+                    continue
+
                 # Pad if necessary
                 if image_patch.shape[0] < self.patch_size or image_patch.shape[1] < self.patch_size:
                     image_patch = self._pad_patch(image_patch)
@@ -246,8 +323,8 @@ class PatchDataset(Dataset):
                 - "image": Float tensor [1, H, W] normalized to [0, 1]
                 - "mask": Float tensor [1, H, W] with values {0, 1}
         """
-        # Determine which image this patch comes from
-        image_idx = idx // self.patches_per_image
+        # Determine which image this patch comes from (cumulative-sum lookup)
+        image_idx = int(np.searchsorted(self._cumulative_patches, idx, side="right"))
 
         # Get image and mask
         image = self.images[image_idx]

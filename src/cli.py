@@ -192,6 +192,10 @@ def sanity_check():
             device = torch.device("cpu")
             print("\n⚠️  Using CPU (training will be slow)")
 
+        # Multi-scale training parameters
+        training_pixel_size = config['model'].get('training_pixel_size', 2.76)
+        max_patches_per_image = config['dataset'].get('max_patches_per_image')
+
         # Create datasets
         print("\nLoading datasets...")
         train_dataset = PatchDataset(
@@ -201,6 +205,8 @@ def sanity_check():
             positive_ratio=positive_ratio,
             augment=config['dataset']['augmentation']['enabled'],
             data_root=data_root,
+            training_pixel_size=training_pixel_size,
+            max_patches_per_image=max_patches_per_image,
         )
 
         val_dataset = PatchDataset(
@@ -210,6 +216,8 @@ def sanity_check():
             positive_ratio=positive_ratio,
             augment=False,  # No augmentation for validation
             data_root=data_root,
+            training_pixel_size=training_pixel_size,
+            max_patches_per_image=max_patches_per_image,
         )
 
         # Create data loaders
@@ -410,6 +418,10 @@ def train():
             device = torch.device("cpu")
             print("\n⚠️  Using CPU (training will be slow)")
 
+        # Multi-scale training parameters
+        training_pixel_size = config['model'].get('training_pixel_size', 2.76)
+        max_patches_per_image = config['dataset'].get('max_patches_per_image')
+
         # Create datasets
         print("\nLoading datasets...")
         train_dataset = PatchDataset(
@@ -419,6 +431,8 @@ def train():
             positive_ratio=positive_ratio,
             augment=config['dataset']['augmentation']['enabled'],
             data_root=data_root,
+            training_pixel_size=training_pixel_size,
+            max_patches_per_image=max_patches_per_image,
         )
 
         val_dataset = PatchDataset(
@@ -428,6 +442,8 @@ def train():
             positive_ratio=positive_ratio,
             augment=False,  # No augmentation for validation
             data_root=data_root,
+            training_pixel_size=training_pixel_size,
+            max_patches_per_image=max_patches_per_image,
         )
 
         # Create data loaders
