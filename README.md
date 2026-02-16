@@ -219,11 +219,63 @@ The reference image should be a typical image from the training set (e.g., one o
 
 ### Multi-Scale Training
 
-The current model is trained at a single resolution (2.76 µm/px). To train a model that handles multiple input resolutions simultaneously:
+Train a single model on images captured at different magnifications. All images are rescaled to a common training resolution (2.76 µm/px) during patch extraction. The model architecture and tile size remain unchanged.
 
-**Approach:** Rescale all training images to a common pixel size before patch extraction. Add a `pixel_size` column to the training manifest so each image is rescaled to the target training resolution during dataset loading. The architecture (256×256 U-Net tiles) stays the same — only the data preparation changes. This means the model learns from images captured at different magnifications but always sees them at a consistent physical scale.
+#### Manifest Setup
 
-**What this does not do:** Preserve fine detail from higher-resolution inputs. A 1.1 µm/px image is downsampled to 2.76 µm/px for both training and inference. Segmenting at 1.1 µm/px resolution would require larger tiles (e.g., 640×640 to cover the same physical area) or architectural changes, increasing GPU memory and training time.
+Add a `pixel_size` column to your training manifest:
+
+```csv
+basename,image_path,mask_path,pixel_size
+sample_001,working/images/sample_001.tif,working/masks/sample_001_mask.tif,2.76
+highres_001,highres/images/highres_001.tif,highres/masks/highres_001_mask.tif,1.1
+```
+
+**Backward compatible:** If the `pixel_size` column is missing, all images are assumed to be at the training resolution (no rescaling). Existing manifests work unchanged.
+
+#### How It Works
+
+During dataset loading, each image is rescaled to the target training resolution based on its `pixel_size` value:
+
+- **Images** are rescaled with bilinear interpolation (anti-aliasing when downsampling)
+- **Masks** are rescaled with nearest-neighbor interpolation to preserve binary 0/255 values
+- Rescaling happens once at load time, not per-patch
+
+#### Area-Proportional Patch Sampling
+
+After rescaling, images from different magnifications may have very different pixel areas (e.g., a 1.1 µm/px image covers ~4x the pixel area of a 2.76 µm/px image after downscaling). To ensure uniform sampling density:
+
+- Each image's patch count is scaled proportionally to its area relative to the mean image area
+- A `max_patches_per_image` cap prevents any single large image from dominating an epoch (default: 4x `patches_per_image`)
+
+#### Dead-Patch Rejection
+
+Large field-of-view images (e.g., full-well captures) often include black borders after rescaling. Negative patches (background samples) that are >95% zero-valued are automatically rejected, so the model doesn't waste training on pure-black tiles.
+
+#### Config Parameters
+
+Multi-scale training uses the existing training config with these relevant parameters:
+
+| Parameter | Location | Default | Description |
+|-----------|----------|---------|-------------|
+| `model.training_pixel_size` | Config YAML | 2.76 | Target resolution for rescaling (µm/px) |
+| `dataset.patches_per_image` | Config YAML | 30 | Base patch count (for reference-sized images) |
+| `dataset.max_patches_per_image` | Config YAML | 4x base | Cap on patches per image |
+
+#### Example Training Command
+
+```bash
+# 1. Prepare combined manifest with pixel_size column
+# 2. Train as usual
+train --config configs/production_train.yaml
+```
+
+No config changes are required beyond adding `pixel_size` to the manifest — the defaults handle everything.
+
+#### Limitations
+
+- **No enhanced resolution:** Higher-resolution inputs (e.g., 1.1 µm/px) are downsampled to 2.76 µm/px — finer detail is discarded. This is acceptable when 2.76 µm/px is sufficient for segmentation. Preserving higher resolution would require larger tiles or architecture changes.
+- **Histogram matching not needed:** The model learns both intensity distributions from the training data directly. Existing brightness/contrast augmentation provides additional robustness.
 
 ---
 
