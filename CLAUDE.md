@@ -62,4 +62,4 @@ train --config configs/production_train_multiscale.yaml
 
 - **Images:** TIFF, RGB or grayscale
 - **Masks:** Binary 0/255, named `<basename>_mask.tif`
-- **Manifests:** CSV with `basename,image_path,mask_path`
+- **Manifests:** CSV with `basename,image_path,mask_path,pixel_size`

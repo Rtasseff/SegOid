@@ -185,29 +185,8 @@ class SegOidApp:
             options_frame,
             label="Compute morphology metrics (area, circularity, etc.)",
             initial_value=True,
-            on_change=self._on_metrics_toggle,
         )
         self.compute_metrics.pack(anchor=tk.W)
-
-        # Scale to micrometers option (sub-option of compute_metrics)
-        self.scale_frame = ttk.Frame(options_frame)
-        self.scale_frame.pack(fill=tk.X, pady=(0, 5))
-
-        self.scale_to_um = CheckboxOption(
-            self.scale_frame,
-            label="Scale to micrometers (µm)",
-            initial_value=False,
-            on_change=self._on_scale_toggle,
-        )
-        self.scale_to_um.pack(side=tk.LEFT, padx=(20, 5))
-
-        self.pixel_size_label = ttk.Label(self.scale_frame, text="Pixel size (µm/px):")
-        self.pixel_size_entry = ttk.Entry(self.scale_frame, width=8)
-        self.pixel_size_entry.insert(0, "2.76")
-
-        # Initially hidden (scale_to_um not checked)
-        self.pixel_size_label.pack_forget()
-        self.pixel_size_entry.pack_forget()
 
         self.export_video = CheckboxOption(
             options_frame,
@@ -321,22 +300,6 @@ class SegOidApp:
             self.schema_label.pack_forget()
             self.schema_entry.pack_forget()
 
-    def _on_metrics_toggle(self, enabled: bool):
-        """Handle compute metrics toggle - show/hide scale options."""
-        if enabled:
-            self.scale_frame.pack(fill=tk.X, pady=(0, 5))
-        else:
-            self.scale_frame.pack_forget()
-
-    def _on_scale_toggle(self, enabled: bool):
-        """Handle scale to micrometers toggle - show/hide pixel size entry."""
-        if enabled:
-            self.pixel_size_label.pack(side=tk.LEFT, padx=(5, 2))
-            self.pixel_size_entry.pack(side=tk.LEFT)
-        else:
-            self.pixel_size_label.pack_forget()
-            self.pixel_size_entry.pack_forget()
-
     def _get_model_path(self) -> Optional[Path]:
         """Get the model path to use."""
         if self.use_custom_model.get():
@@ -388,30 +351,17 @@ class SegOidApp:
             labels = [l.strip() for l in self.schema_entry.get().split(",")]
             filename_schema = {"labels": labels, "delimiter": "_"}
 
-        # Get inference pixel size (for multi-resolution rescaling)
-        inference_pixel_size = None
+        # Get pixel size (used for both inference rescaling and metric conversion)
+        pixel_size = None
         try:
             pixel_size_str = self.inference_pixel_size_entry.get().strip()
             if pixel_size_str:
-                inference_pixel_size = float(pixel_size_str)
+                pixel_size = float(pixel_size_str)
         except ValueError:
-            messagebox.showerror("Error", "Invalid inference pixel size. Please enter a number.")
+            messagebox.showerror("Error", "Invalid pixel size. Please enter a number.")
             self.run_btn.config(state=tk.NORMAL)
             self.cancel_btn.config(state=tk.DISABLED)
             return
-
-        # Get metrics pixel size if scaling to micrometers
-        # If not specified, use inference pixel size
-        metrics_pixel_size = None
-        if self.compute_metrics.get() and self.scale_to_um.get():
-            try:
-                metrics_pixel_size = float(self.pixel_size_entry.get())
-            except ValueError:
-                # Fall back to inference pixel size
-                metrics_pixel_size = inference_pixel_size
-
-        # Use inference pixel size for both inference rescaling and metrics if available
-        pixel_size = inference_pixel_size if inference_pixel_size is not None else metrics_pixel_size
 
         # Get histogram reference path if enabled
         histogram_reference_path = None
@@ -435,7 +385,7 @@ class SegOidApp:
             compute_metrics=self.compute_metrics.get(),
             export_video=self.export_video.get(),
             filename_schema=filename_schema,
-            pixel_size=pixel_size,  # Used for both inference rescaling and metrics
+            pixel_size=pixel_size,
             histogram_reference_path=histogram_reference_path,
         )
         self.current_job.start()

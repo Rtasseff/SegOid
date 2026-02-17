@@ -695,7 +695,7 @@ def predict_image_from_path(
     rescale_applied = False
 
     if pixel_size is not None and abs(pixel_size - training_pixel_size) > 1e-6:
-        scale_factor = training_pixel_size / pixel_size
+        scale_factor = pixel_size / training_pixel_size
         rescale_applied = True
 
         # Calculate scaled dimensions
@@ -878,7 +878,7 @@ def predict_single_image(
         rescale_applied = False
 
         if pixel_size is not None and abs(pixel_size - training_pixel_size) > 1e-6:
-            scale_factor = training_pixel_size / pixel_size
+            scale_factor = pixel_size / training_pixel_size
             rescale_applied = True
 
             # Calculate scaled dimensions

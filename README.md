@@ -267,10 +267,8 @@ Multi-scale training uses the existing training config with these relevant param
 ```bash
 # 1. Prepare combined manifest with pixel_size column
 # 2. Train as usual
-train --config configs/production_train.yaml
+train --config configs/production_train_multiscale.yaml
 ```
-
-No config changes are required beyond adding `pixel_size` to the manifest — the defaults handle everything.
 
 #### Limitations
 
@@ -493,7 +491,7 @@ validate_dataset --input-dir data/working/ --output-dir data/splits/
 ### 3. Retrain Model
 
 ```bash
-train --config configs/production_train.yaml
+train --config configs/production_train_multiscale.yaml
 ```
 
 New model saved to: `runs/train_<timestamp>/checkpoints/best_model.pth`
@@ -538,7 +536,7 @@ make_splits \
 ### Train Model
 
 ```bash
-train --config configs/production_train.yaml
+train --config configs/production_train_multiscale.yaml
 ```
 
 **Parameters (via config file):**
@@ -564,7 +562,7 @@ tensorboard --logdir runs/
 Run leave-one-out cross-validation for performance estimation:
 
 ```bash
-run_cv --config configs/cv_config.yaml
+run_cv --config configs/cv_multiscale.yaml
 ```
 
 **Results location:** `runs/cv_<timestamp>/results/`
@@ -635,6 +633,9 @@ segoid/
 │   └── analysis/            # Quantification
 ├── tests/                   # Unit tests
 └── docs/                    # Additional documentation
+    ├── PRODUCTION_MODEL.md
+    ├── MULTI_SCALE_TRAINING_RESULTS.md
+    └── WINDOWS_DESKTOP_BUNDLE.md
 ```
 
 ---
@@ -741,8 +742,4 @@ tensorboard --logdir runs/ --reload_multifile=true
 
 ## License
 
-[Your license here]
-
-## Citation
-
-[Citation information if applicable]
+MIT License. See [LICENSE](LICENSE) for details.

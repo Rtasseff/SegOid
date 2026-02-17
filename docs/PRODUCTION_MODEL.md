@@ -2,9 +2,9 @@
 
 ## Overview
 
-This guide documents the production model trained on all 6 labeled images for maximum data utilization. This model is designed for use in a human-in-the-loop data flywheel:
+This guide documents the production model trained on all 9 labeled images for maximum data utilization. This model is designed for use in a human-in-the-loop data flywheel:
 
-1. **Train** on all available labeled data (6 images)
+1. **Train** on all available labeled data (9 images)
 2. **Infer** on unlabeled images
 3. **Review** predictions and correct errors
 4. **Retrain** with expanded dataset
@@ -13,10 +13,10 @@ This guide documents the production model trained on all 6 labeled images for ma
 
 ### Configuration
 
-The production training configuration is in `configs/production_train.yaml`:
+The production training configuration is in `configs/production_train_multiscale.yaml`:
 
 - **Training data**: All 6 labeled images (data/splits/all.csv)
-- **Validation data**: Same 6 images (monitors training performance, not generalization)
+- **Validation data**: Same 9 images (monitors training performance, not generalization)
 - **Epochs**: 100 (no early stopping)
 - **Patches per image**: 30 (increased sampling for better coverage)
 - **Architecture**: U-Net with ResNet18 encoder
@@ -29,7 +29,7 @@ The production training configuration is in `configs/production_train.yaml`:
 source .venv/bin/activate
 
 # Train production model
-train --config configs/production_train.yaml
+train --config configs/production_train_multiscale.yaml
 ```
 
 ### Training Outputs
@@ -158,7 +158,7 @@ cp corrected_masks/*_mask.tif data/working/masks/
 # Regenerate manifest with new data
 validate_dataset --input-dir data/working/ --output-dir data/splits/
 
-# Check: you should now have more than 6 images
+# Check: you should now have more than 9 images
 wc -l data/splits/all.csv
 ```
 
@@ -166,7 +166,7 @@ wc -l data/splits/all.csv
 
 ```bash
 # Retrain production model with expanded dataset
-train --config configs/production_train.yaml
+train --config configs/production_train_multiscale.yaml
 
 # New model will be saved to runs/train_<new_timestamp>/
 ```
@@ -240,7 +240,7 @@ val_dice = checkpoint['history']['val_dice']
 
 ## Model Performance Notes
 
-**Important**: This production model is trained and validated on the same 6 images, so validation metrics reflect **training performance**, not generalization to new data.
+**Important**: This production model is trained and validated on the same 9 images, so validation metrics reflect **training performance**, not generalization to new data.
 
 **Expected metrics:**
 - Training Dice: 0.95-0.99 (very high, fitting training data)
@@ -258,7 +258,7 @@ val_dice = checkpoint['history']['val_dice']
 ```
 ┌─────────────────────────────────────────────────────┐
 │  1. TRAIN on all labeled data                       │
-│     → train --config configs/production_train.yaml  │
+│     → train --config configs/production_train_multiscale.yaml  │
 └────────────────┬────────────────────────────────────┘
                  │
                  ▼

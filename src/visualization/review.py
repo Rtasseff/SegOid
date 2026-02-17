@@ -371,6 +371,16 @@ def export_review_video(
         max_height = max(max_height, h)
         max_width = max(max_width, w)
 
+    # Cap video dimensions for player compatibility (most players struggle above 1920p)
+    MAX_VIDEO_DIM = 1920
+    if max(max_width, max_height) > MAX_VIDEO_DIM:
+        scale = MAX_VIDEO_DIM / max(max_width, max_height)
+        max_width = int(max_width * scale)
+        max_height = int(max_height * scale)
+        # Ensure even dimensions (required by most codecs)
+        max_width = max_width - (max_width % 2)
+        max_height = max_height - (max_height % 2)
+
     print(f"  Video dimensions: {max_width} x {max_height}")
 
     # Initialize video writer
