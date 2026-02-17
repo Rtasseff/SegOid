@@ -15,9 +15,9 @@ SegOid uses a U-Net architecture with a ResNet18 encoder to segment spheroids fr
 
 | Metric | Value |
 |--------|-------|
-| Training | 6 labeled images, 100 epochs |
-| Validation Dice | 0.91+ |
-| Cross-validation (6-fold LOOCV) | 0.917 ± 0.023 |
+| Training | 9 labeled images (2 resolutions), 100 epochs |
+| Validation Dice | 0.94 |
+| Cross-validation (9-fold LOOCV) | 0.934 ± 0.026 |
 
 ---
 
@@ -113,7 +113,7 @@ print(f'Created {output_csv}')
 source .venv/bin/activate
 
 predict_full \
-    --checkpoint runs/train_20251229_194116/checkpoints/best_model.pth \
+    --checkpoint runs/train_20260216_173233/checkpoints/best_model.pth \
     --manifest my_images.csv \
     --output-dir inference/my_batch/ \
     --data-root .
@@ -164,7 +164,7 @@ The production model was trained on images at **2.76 µm/pixel**. If your images
 ```bash
 # High-magnification images (1.1 µm/pixel)
 predict_full \
-    --checkpoint runs/train_20251229_194116/checkpoints/best_model.pth \
+    --checkpoint runs/train_20260216_173233/checkpoints/best_model.pth \
     --manifest high_mag_images.csv \
     --output-dir inference/high_mag/ \
     --pixel-size 1.1
@@ -191,7 +191,7 @@ If images at a different magnification also have different intensity characteris
 
 ```bash
 predict_full \
-    --checkpoint runs/train_20251229_194116/checkpoints/best_model.pth \
+    --checkpoint runs/train_20260216_173233/checkpoints/best_model.pth \
     --manifest high_mag_images.csv \
     --output-dir inference/high_mag/ \
     --pixel-size 1.1 \
@@ -438,7 +438,7 @@ EOF
 
 # 3. Run inference
 predict_full \
-    --checkpoint runs/train_20251229_194116/checkpoints/best_model.pth \
+    --checkpoint runs/train_20260216_173233/checkpoints/best_model.pth \
     --manifest batch_001.csv \
     --output-dir inference/batch_001/ \
     --data-root /
@@ -508,8 +508,8 @@ TRAIN → INFER → REVIEW → CORRECT → RETRAIN
   └────────────────────────────────────┘
 ```
 
-- Start: 6 images → Model Dice 0.91
-- After corrections: 10+ images → Improved performance
+- Start: 9 images (2 resolutions) → Model Dice 0.934
+- After corrections: 12+ images → Improved performance
 - Repeat until predictions need minimal correction
 
 ---
@@ -576,30 +576,33 @@ run_cv --config configs/cv_config.yaml
 
 ## Model Performance Details
 
-### Cross-Validation Results (6-fold Leave-One-Out)
+### Cross-Validation Results (9-fold Leave-One-Out, Multi-Scale)
 
-| Fold | Val Image | Best Val Dice | Best Epoch |
-|------|-----------|---------------|------------|
-| 0 | dECM_1_1 | ? | ? |
-| 1 | dECM_1_2 | ? | ? |
-| 2 | dECM_2_1 | ? | ? |
-| 3 | dECM_2_2 | ? | ? |
-| 4 | Matri_1_1 | ? | ? |
-| 5 | Matri_1_2 | ? | ? |
-| **Mean** | | **0.917 ± 0.023** | |
+| Fold | Val Image | Resolution | Best Val Dice | Best Epoch |
+|------|-----------|-----------|---------------|------------|
+| 0 | dECM_1_1 | 2.76 µm/px | 0.9206 | 28 |
+| 1 | dECM_1_2 | 2.76 µm/px | 0.9304 | 20 |
+| 2 | dECM_2_1 | 2.76 µm/px | 0.9156 | 5 |
+| 3 | dECM_2_2 | 2.76 µm/px | 0.9296 | 5 |
+| 4 | Matri_1_1 | 2.76 µm/px | 0.8839 | 9 |
+| 5 | Matri_1_2 | 2.76 µm/px | 0.9407 | 26 |
+| 6 | GFR_1_1 | 1.10 µm/px | 0.9554 | 7 |
+| 7 | Normal_1_1 | 1.10 µm/px | 0.9616 | 12 |
+| 8 | Normal_1_2 | 1.10 µm/px | 0.9665 | 18 |
+| **Mean** | | | **0.934 ± 0.026** | |
 
-**CV Run:** `runs/cv_20251228_*/`
-**CV Config:** `configs/cv_config.yaml`
+**CV Run:** `runs/cv_20260216_171900/`
+**CV Config:** `configs/cv_multiscale.yaml`
 
 ### Production Model
 
 | Property | Value |
 |----------|-------|
-| Checkpoint | `runs/train_20251229_194116/checkpoints/best_model.pth` |
-| Config | `configs/production_train.yaml` |
-| Training Data | All 6 labeled images |
+| Checkpoint | `runs/train_20260216_173233/checkpoints/best_model.pth` |
+| Config | `configs/production_train_multiscale.yaml` |
+| Training Data | All 9 labeled images (6 at 2.76 µm/px + 3 at 1.10 µm/px) |
 | Epochs | 100 |
-| Validation Dice | 0.91+ |
+| Best Validation Dice | 0.940 (epoch 62) |
 
 ---
 
@@ -608,18 +611,22 @@ run_cv --config configs/cv_config.yaml
 ```
 segoid/
 ├── data/
-│   ├── working/
-│   │   ├── images/          # Training images (*.tif)
-│   │   └── masks/           # Binary masks (*_mask.tif)
-│   └── splits/              # CSV manifests
+│   ├── working_276/         # Training images at 2.76 µm/px
+│   │   ├── images/
+│   │   └── masks/
+│   ├── working_110/         # Training images at 1.10 µm/px
+│   │   ├── images/
+│   │   └── masks/
+│   └── splits/              # CSV manifests (all.csv with pixel_size)
 ├── runs/                    # Training outputs
-│   ├── train_20251229_*/    # Production model
-│   └── cv_20251228_*/       # Cross-validation results
+│   ├── train_20260216_*/    # Production model (multi-scale, 9 images)
+│   └── cv_20260216_*/       # Cross-validation results
 ├── inference/               # Prediction outputs
 ├── metrics/                 # Quantification outputs
 ├── configs/                 # YAML configurations
+│   ├── production_train_multiscale.yaml
+│   ├── cv_multiscale.yaml
 │   ├── production_train.yaml
-│   ├── train.yaml
 │   └── cv_config.yaml
 ├── src/                     # Source code
 │   ├── data/                # Dataset, validation

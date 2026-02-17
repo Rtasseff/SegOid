@@ -188,6 +188,10 @@ def run_cross_validation(
         patches_per_image = fold_config["dataset"]["patches_per_image"]
         positive_ratio = fold_config["dataset"]["positive_ratio"]
 
+        # Multi-scale training params
+        training_pixel_size = fold_config["model"].get("training_pixel_size", 2.76)
+        max_patches_per_image = fold_config["dataset"].get("max_patches_per_image")
+
         print(f"Loading datasets...")
         train_dataset = PatchDataset(
             manifest_csv=train_csv,
@@ -196,6 +200,8 @@ def run_cross_validation(
             positive_ratio=positive_ratio,
             augment=fold_config["dataset"]["augmentation"]["enabled"],
             data_root=data_root,
+            training_pixel_size=training_pixel_size,
+            max_patches_per_image=max_patches_per_image,
         )
 
         val_dataset = PatchDataset(
@@ -205,6 +211,8 @@ def run_cross_validation(
             positive_ratio=positive_ratio,
             augment=False,  # No augmentation for validation
             data_root=data_root,
+            training_pixel_size=training_pixel_size,
+            max_patches_per_image=max_patches_per_image,
         )
 
         # Create data loaders

@@ -24,7 +24,7 @@ source .venv/bin/activate
 
 # Run inference
 predict_full \
-    --checkpoint runs/train_20251229_194116/checkpoints/best_model.pth \
+    --checkpoint runs/train_20260216_173233/checkpoints/best_model.pth \
     --manifest <your_images.csv> \
     --output-dir inference/<batch_name>/
 
@@ -45,17 +45,18 @@ quantify_objects --pred-mask-dir <preds/> --gt-manifest <manifest.csv> --output-
 
 # Training (if retraining)
 validate_dataset --input-dir data/working/ --output-dir data/splits/
-train --config configs/production_train.yaml
+train --config configs/production_train_multiscale.yaml
 ```
 
 ## Key Paths
 
 | Path | Description |
 |------|-------------|
-| `runs/train_20251229_194116/checkpoints/best_model.pth` | Production model |
-| `configs/production_train.yaml` | Training config |
-| `data/working/images/`, `masks/` | Training data |
-| `data/splits/all.csv` | Dataset manifest |
+| `runs/train_20260216_173233/checkpoints/best_model.pth` | Production model (multi-scale, 9 images) |
+| `configs/production_train_multiscale.yaml` | Production training config |
+| `configs/cv_multiscale.yaml` | Cross-validation config |
+| `data/working_276/`, `data/working_110/` | Training data (2 resolutions) |
+| `data/splits/all.csv` | Dataset manifest (9 images, with pixel_size) |
 
 ## Conventions
 
