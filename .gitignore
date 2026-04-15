@@ -53,6 +53,10 @@ htmlcov/
 /inference/
 /metrics/
 
+# Size analysis artifacts (large prediction outputs, local only)
+/scripts/_size_analysis_preds/
+/scripts/_size_analysis_results.csv
+
 # Model checkpoints (too large for git)
 *.pth
 *.pt
