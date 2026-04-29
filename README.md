@@ -2,6 +2,8 @@
 
 A PyTorch-based semantic segmentation pipeline for identifying spheroids in microscopy images. Trained on well-plate images, outputs binary masks and morphology metrics.
 
+> **Are you a researcher running SegOid (not modifying it)?** Read the friendly walkthrough at [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) instead. This README is the technical reference for developers.
+
 ## Overview
 
 SegOid uses a U-Net architecture with a ResNet18 encoder to segment spheroids from microscopy images. The pipeline:
