@@ -7,7 +7,7 @@ Build with:
 
 Prerequisites:
     1. Export ONNX model first:
-       export_onnx --checkpoint runs/train_20260216_173233/checkpoints/best_model.pth \
+       export_onnx --checkpoint models/production_v2.0/checkpoints/best_model.pth \
                    --output assets/segoid_model.onnx
 
     2. Install PyInstaller:

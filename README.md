@@ -113,7 +113,7 @@ print(f'Created {output_csv}')
 source .venv/bin/activate
 
 predict_full \
-    --checkpoint runs/train_20260216_173233/checkpoints/best_model.pth \
+    --checkpoint models/production_v2.0/checkpoints/best_model.pth \
     --manifest my_images.csv \
     --output-dir inference/my_batch/ \
     --data-root .
@@ -164,7 +164,7 @@ The production model was trained on images at **2.76 µm/pixel**. If your images
 ```bash
 # High-magnification images (1.1 µm/pixel)
 predict_full \
-    --checkpoint runs/train_20260216_173233/checkpoints/best_model.pth \
+    --checkpoint models/production_v2.0/checkpoints/best_model.pth \
     --manifest high_mag_images.csv \
     --output-dir inference/high_mag/ \
     --pixel-size 1.1
@@ -191,7 +191,7 @@ If images at a different magnification also have different intensity characteris
 
 ```bash
 predict_full \
-    --checkpoint runs/train_20260216_173233/checkpoints/best_model.pth \
+    --checkpoint models/production_v2.0/checkpoints/best_model.pth \
     --manifest high_mag_images.csv \
     --output-dir inference/high_mag/ \
     --pixel-size 1.1 \
@@ -436,7 +436,7 @@ EOF
 
 # 3. Run inference
 predict_full \
-    --checkpoint runs/train_20260216_173233/checkpoints/best_model.pth \
+    --checkpoint models/production_v2.0/checkpoints/best_model.pth \
     --manifest batch_001.csv \
     --output-dir inference/batch_001/ \
     --data-root /
@@ -596,11 +596,35 @@ run_cv --config configs/cv_multiscale.yaml
 
 | Property | Value |
 |----------|-------|
-| Checkpoint | `runs/train_20260216_173233/checkpoints/best_model.pth` |
+| Checkpoint | `models/production_v2.0/checkpoints/best_model.pth` |
 | Config | `configs/production_train_multiscale.yaml` |
 | Training Data | All 9 labeled images (6 at 2.76 µm/px + 3 at 1.10 µm/px) |
 | Epochs | 100 |
 | Best Validation Dice | 0.940 (epoch 62) |
+
+#### `models/` vs `runs/` Convention
+
+Curated/blessed model artifacts live in `models/<version>/`, kept separate from experimental training output in `runs/`. Each `models/<version>/` folder is **self-describing** so the run can be reproduced or audited without external lookup:
+
+```
+models/production_v2.0/
+├── checkpoints/best_model.pth   # production weights
+├── config.yaml                   # training config snapshot
+├── manifest.csv                  # dataset manifest snapshot (which images, masks, pixel sizes)
+└── tensorboard/                  # training logs (optional)
+```
+
+`runs/` is treated as ephemeral/experimental scratch — it may be gitignored and may live on a non-backed-up drive. Anything blessed for production gets promoted into `models/` so it has a stable path and a backup story decoupled from training scratch space. Both `runs/` and `models/` are gitignored (large `.pth` files), but the convention is universal — every checkout of this repo should adopt it.
+
+To promote a run to a production model:
+
+```bash
+mkdir -p models/<version>
+cp -r runs/<run_name>/checkpoints models/<version>/
+cp runs/<run_name>/config.yaml models/<version>/
+cp data/splits/<manifest_used>.csv models/<version>/manifest.csv
+cp -r runs/<run_name>/tensorboard models/<version>/   # optional
+```
 
 ---
 
@@ -616,9 +640,11 @@ segoid/
 │   │   ├── images/
 │   │   └── masks/
 │   └── splits/              # CSV manifests (all.csv with pixel_size)
-├── runs/                    # Training outputs
-│   ├── train_20260216_*/    # Production model (multi-scale, 9 images)
+├── runs/                    # Training outputs (experimental/scratch — gitignored)
+│   ├── train_20260216_*/    # Source training run for production_v2.0
 │   └── cv_20260216_*/       # Cross-validation results
+├── models/                  # Curated/blessed production checkpoints (gitignored)
+│   └── production_v2.0/     # Self-describing: checkpoints + config + manifest
 ├── inference/               # Prediction outputs
 ├── metrics/                 # Quantification outputs
 ├── configs/                 # YAML configurations

@@ -24,7 +24,7 @@ source .venv/bin/activate
 
 # Run inference
 predict_full \
-    --checkpoint runs/train_20260216_173233/checkpoints/best_model.pth \
+    --checkpoint models/production_v2.0/checkpoints/best_model.pth \
     --manifest <your_images.csv> \
     --output-dir inference/<batch_name>/
 
@@ -52,11 +52,30 @@ train --config configs/production_train_multiscale.yaml
 
 | Path | Description |
 |------|-------------|
-| `runs/train_20260216_173233/checkpoints/best_model.pth` | Production model (multi-scale, 9 images) |
+| `models/production_v2.0/checkpoints/best_model.pth` | Production model (multi-scale, 9 images) — backed up on SSD |
+| `models/production_v2.0/config.yaml` | Training config snapshot used to produce the production model |
+| `models/production_v2.0/manifest.csv` | Manifest snapshot used to produce the production model |
 | `configs/production_train_multiscale.yaml` | Production training config |
 | `configs/cv_multiscale.yaml` | Cross-validation config |
 | `data/working_276/`, `data/working_110/` | Training data (2 resolutions) |
-| `data/splits/all.csv` | Dataset manifest (9 images, with pixel_size) |
+| `data/splits/all.csv` | Current dataset manifest (9 images, with pixel_size) |
+
+## Production Model Convention
+
+Curated/blessed model artifacts live in `models/<version>/`, kept separate from experimental training output in `runs/`. Each `models/<version>/` folder is self-describing — it contains everything needed to reproduce the model:
+
+- `checkpoints/best_model.pth` — the production weights
+- `config.yaml` — training config snapshot
+- `manifest.csv` — dataset manifest snapshot (which images, masks, pixel sizes)
+- `tensorboard/` — training logs (optional)
+
+Why separate from `runs/`: `runs/` is treated as ephemeral/experimental output (often gitignored, sometimes stored on non-backed-up scratch drives). Anything blessed for production gets promoted into `models/` so it has a stable path and a backup story decoupled from training scratch space.
+
+`models/` is gitignored (large `.pth` files), but the convention is universal — every checkout of this repo should adopt it.
+
+## Local Setup
+
+If a `LOCAL_SETUP.md` file exists in the project root (gitignored, machine-specific), it documents that machine's storage arrangement — for example, whether `data/`, `runs/`, or `inference/` are symlinks to a different drive, and any local conventions for backups or scratch space. Read it when working on a machine that has one; it captures things that aren't true universally for the repo.
 
 ## Conventions
 

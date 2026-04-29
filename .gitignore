@@ -46,12 +46,23 @@ htmlcov/
 .tox/
 
 # Data directory (never commit raw data)
+# No trailing slash — also matches the symlink at the project root that points to /mnt/d/...
+/data
 /data/
 
 # Training outputs (at project root, not source code)
+# These may be symlinks to /mnt/d/...; no trailing slash matches the symlink too
+/runs
 /runs/
+/inference
 /inference/
 /metrics/
+
+# Curated/blessed model artifacts (large checkpoints; backed up via SSD, not git)
+/models/
+
+# Per-machine setup notes (machine-specific, not for the repo)
+LOCAL_SETUP.md
 
 # Size analysis artifacts (large prediction outputs, local only)
 /scripts/_size_analysis_preds/
