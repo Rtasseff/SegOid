@@ -56,16 +56,22 @@ def extract_objects(mask: np.ndarray, min_area: int = 100) -> Tuple[np.ndarray, 
 
 def compute_object_properties(
     labeled_mask: np.ndarray,
-    pixel_size: Optional[float] = None
+    pixel_size: Optional[float] = None,
+    companions: Optional[Dict[str, np.ndarray]] = None,
 ) -> pd.DataFrame:
     """
     Compute morphology metrics for each object in labeled mask.
 
     When pixel_size is provided, outputs both pixel and physical measurements.
+    When companions is provided, also computes per-object mean intensity within
+    each companion image and adds ``mean_intensity_<marker>`` columns.
 
     Args:
         labeled_mask: Integer array (H, W) with unique label per object (0 = background)
         pixel_size: Optional pixel size in micrometers for physical unit conversion
+        companions: Optional mapping from marker name → 2D grayscale companion image
+            (single-channel TIFF as a 2D ndarray). Companion shape must equal
+            labeled_mask.shape; multi-channel inputs are rejected.
 
     Returns:
         DataFrame with one row per object containing:
@@ -81,12 +87,33 @@ def compute_object_properties(
             - major_axis_length_px, major_axis_length_um
             - minor_axis_length_px, minor_axis_length_um
 
+        When companions is provided:
+            - mean_intensity_<marker> for each marker, sorted alphabetically
+
         Always included:
             - eccentricity: ellipse eccentricity (0=circle, 1=line)
             - circularity: 4πA/P² (1=perfect circle)
             - centroid_x, centroid_y: object center (px)
             - bbox_min_row, bbox_min_col, bbox_max_row, bbox_max_col: bounding box (px)
     """
+    if companions:
+        for marker, img in companions.items():
+            if img is None:
+                continue
+            arr = np.asarray(img)
+            if arr.ndim != 2:
+                raise ValueError(
+                    f"Companion image for marker '{marker}' is not single-channel "
+                    f"grayscale (got shape {arr.shape}). Re-export as a single-channel "
+                    "grayscale TIFF from your microscope."
+                )
+            if arr.shape != labeled_mask.shape:
+                raise ValueError(
+                    f"Companion image for marker '{marker}' has shape {arr.shape}, "
+                    f"but predicted mask has shape {labeled_mask.shape}. "
+                    "Companion images must be co-registered with the base image."
+                )
+
     props = measure.regionprops(labeled_mask)
 
     # Determine column names based on whether physical units are included
@@ -112,9 +139,15 @@ def compute_object_properties(
             'bbox_min_row', 'bbox_min_col', 'bbox_max_row', 'bbox_max_col'
         ]
 
+    marker_columns: List[str] = (
+        sorted(f"mean_intensity_{m}" for m, img in companions.items() if img is not None)
+        if companions
+        else []
+    )
+
     if len(props) == 0:
         # Return empty DataFrame with expected columns
-        return pd.DataFrame(columns=base_columns)
+        return pd.DataFrame(columns=base_columns + marker_columns)
 
     records = []
 
@@ -164,6 +197,18 @@ def compute_object_properties(
             record['equivalent_diameter_um'] = equiv_diameter_px * pixel_size
             record['major_axis_length_um'] = major_axis_px * pixel_size
             record['minor_axis_length_um'] = minor_axis_px * pixel_size
+
+        # Add per-marker mean intensity inside this object
+        if companions:
+            object_pixels = labeled_mask == prop.label
+            for marker in sorted(companions.keys()):
+                img = companions[marker]
+                if img is None:
+                    continue
+                values = np.asarray(img)[object_pixels]
+                record[f"mean_intensity_{marker}"] = (
+                    float(values.mean()) if values.size > 0 else float("nan")
+                )
 
         records.append(record)
 
@@ -326,7 +371,8 @@ def process_image_pair(
     gt_mask_path: Path,
     min_object_area: int = 100,
     iou_threshold: float = 0.5,
-    pixel_size: Optional[float] = None
+    pixel_size: Optional[float] = None,
+    companions: Optional[Dict[str, np.ndarray]] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, float], np.ndarray, np.ndarray]:
     """
     Process a single image pair: extract objects, match, and compute metrics.
@@ -337,6 +383,9 @@ def process_image_pair(
         min_object_area: Minimum object area in pixels
         iou_threshold: Minimum IoU for valid match
         pixel_size: Optional pixel size in µm for physical units
+        companions: Optional ``{marker: 2D ndarray}`` of single-channel
+            companion images (same shape as pred_mask) for per-object
+            mean intensity computation.
 
     Returns:
         object_properties: DataFrame with per-object morphology from predictions
@@ -366,7 +415,9 @@ def process_image_pair(
     gt_labels, n_gt = extract_objects(gt_mask, min_area=min_object_area)
 
     # Compute morphology for predicted objects
-    object_properties = compute_object_properties(pred_labels, pixel_size=pixel_size)
+    object_properties = compute_object_properties(
+        pred_labels, pixel_size=pixel_size, companions=companions or None,
+    )
 
     # Match objects
     matches, fps, fns = match_objects(pred_labels, gt_labels, iou_threshold=iou_threshold)

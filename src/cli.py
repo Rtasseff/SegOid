@@ -753,6 +753,17 @@ def quantify_objects():
         default="data/",
         help="Root directory for relative paths in manifest (default: data/)",
     )
+    parser.add_argument(
+        "--markers",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated fluorescence marker suffix names (e.g. 'green,red'). "
+            "When set, the manifest must contain companion_<marker> columns per "
+            "marker (paths to single-channel grayscale TIFFs). Per-object "
+            "mean_intensity_<marker> columns are added to the output."
+        ),
+    )
     args = parser.parse_args()
 
     try:
@@ -771,6 +782,7 @@ def quantify_objects():
         gt_manifest_path = Path(args.gt_manifest)
         output_dir = Path(args.output_dir)
         data_root = Path(args.data_root)
+        markers = [m.strip() for m in args.markers.split(",") if m.strip()]
 
         print(f"\nConfiguration:")
         print(f"  Predicted masks: {pred_mask_dir}")
@@ -780,6 +792,8 @@ def quantify_objects():
         print(f"  IoU threshold: {args.iou_threshold}")
         if args.pixel_size:
             print(f"  Pixel size: {args.pixel_size} µm")
+        if markers:
+            print(f"  Markers: {', '.join(markers)}")
 
         # Verify inputs
         if not pred_mask_dir.exists():
@@ -824,6 +838,28 @@ def quantify_objects():
 
             print(f"  [{idx + 1}/{len(gt_manifest)}] Processing {basename}...")
 
+            # Load companion images if markers were declared.
+            companions_for_image = None
+            if markers:
+                import tifffile
+                companions_for_image = {}
+                for marker in markers:
+                    col = f"companion_{marker}"
+                    if col not in row or pd.isna(row[col]) or not row[col]:
+                        continue
+                    comp_path = Path(row[col])
+                    if not comp_path.is_absolute():
+                        comp_path = data_root / comp_path
+                    if not comp_path.exists():
+                        logging.warning(
+                            f"Companion '{marker}' not found for {basename}: {comp_path}"
+                        )
+                        continue
+                    try:
+                        companions_for_image[marker] = tifffile.imread(comp_path)
+                    except Exception as e:
+                        logging.warning(f"Failed to load companion '{marker}' for {basename}: {e}")
+
             # Process this image pair
             obj_props, inst_metrics, _, _ = process_image_pair(
                 pred_mask_path=pred_mask_path,
@@ -831,11 +867,17 @@ def quantify_objects():
                 min_object_area=args.min_object_area,
                 iou_threshold=args.iou_threshold,
                 pixel_size=args.pixel_size,
+                companions=companions_for_image or None,
             )
 
             # Save per-image object properties
             if len(obj_props) > 0:
                 obj_props["image"] = basename
+                # Ensure all declared marker columns are present (NaN when missing)
+                for marker in markers:
+                    col = f"mean_intensity_{marker}"
+                    if col not in obj_props.columns:
+                        obj_props[col] = float("nan")
                 per_image_csv = per_image_dir / f"{basename}_objects.csv"
                 obj_props.to_csv(per_image_csv, index=False)
                 all_objects.append(obj_props)

@@ -510,6 +510,8 @@ TRAIN → INFER → REVIEW → CORRECT → RETRAIN
 - After corrections: 12+ images → Improved performance
 - Repeat until predictions need minimal correction
 
+> **Want to contribute corrected masks?** See [`docs/CONTRIBUTING_TRAINING_DATA.md`](docs/CONTRIBUTING_TRAINING_DATA.md) — currently a stub. Email the maintainer in the meantime.
+
 ---
 
 ## Training Commands

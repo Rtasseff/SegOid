@@ -33,6 +33,7 @@ dependencies = [
     "matplotlib>=3.7.0",
     "onnx>=1.14.0",
     "onnxruntime>=1.16.0",
+    "openpyxl>=3.1.0",
 ]
 
 [project.optional-dependencies]
@@ -70,6 +71,7 @@ run_cv = "src.cli:run_cv"
 review_predictions = "src.cli:review_predictions"
 export_onnx = "src.cli:export_onnx"
 segoid_gui = "src.cli:run_gui"
+post_seg_analyze = "src.post_segmentation.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

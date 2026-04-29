@@ -163,6 +163,68 @@ class TestComputeObjectProperties:
         assert df.loc[0, 'bbox_max_col'] == 50
 
 
+class TestCompanionIntensity:
+    """Test mean_intensity_<marker> columns from companion images."""
+
+    def _two_object_mask(self):
+        labeled = np.zeros((100, 100), dtype=np.int32)
+        labeled[10:30, 10:30] = 1   # 400 px object
+        labeled[70:90, 70:90] = 2   # 400 px object
+        return labeled
+
+    def test_no_companions_no_intensity_columns(self):
+        """Regression: omitting companions must not change the output schema."""
+        labeled = self._two_object_mask()
+        df = compute_object_properties(labeled, pixel_size=2.76)
+        intensity_cols = [c for c in df.columns if c.startswith("mean_intensity_")]
+        assert intensity_cols == []
+
+    def test_single_marker_exact_means(self):
+        labeled = self._two_object_mask()
+        green = np.zeros((100, 100), dtype=np.float32)
+        green[labeled == 1] = 50.0
+        green[labeled == 2] = 200.0
+
+        df = compute_object_properties(labeled, companions={"green": green})
+        assert "mean_intensity_green" in df.columns
+        assert df.loc[df.object_id == 1, "mean_intensity_green"].iloc[0] == 50.0
+        assert df.loc[df.object_id == 2, "mean_intensity_green"].iloc[0] == 200.0
+
+    def test_multiple_markers_sorted(self):
+        labeled = self._two_object_mask()
+        green = np.zeros((100, 100), dtype=np.float32)
+        red = np.zeros((100, 100), dtype=np.float32)
+        green[labeled == 1] = 1.0
+        red[labeled == 1] = 2.0
+
+        df = compute_object_properties(labeled, companions={"red": red, "green": green})
+        intensity_cols = [c for c in df.columns if c.startswith("mean_intensity_")]
+        assert intensity_cols == ["mean_intensity_green", "mean_intensity_red"]
+
+    def test_multichannel_companion_rejected(self):
+        labeled = self._two_object_mask()
+        bad = np.zeros((100, 100, 3), dtype=np.uint8)  # RGB, not grayscale
+        with pytest.raises(ValueError) as excinfo:
+            compute_object_properties(labeled, companions={"green": bad})
+        msg = str(excinfo.value)
+        assert "single-channel grayscale" in msg
+        assert "green" in msg
+
+    def test_shape_mismatch_rejected(self):
+        labeled = self._two_object_mask()
+        wrong_shape = np.zeros((50, 50), dtype=np.float32)
+        with pytest.raises(ValueError) as excinfo:
+            compute_object_properties(labeled, companions={"green": wrong_shape})
+        assert "shape" in str(excinfo.value)
+
+    def test_companion_with_none_value_skipped(self):
+        """A marker with None companion is skipped, not errored."""
+        labeled = self._two_object_mask()
+        df = compute_object_properties(labeled, companions={"green": None})
+        intensity_cols = [c for c in df.columns if c.startswith("mean_intensity_")]
+        assert intensity_cols == []
+
+
 class TestComputeIoUMatrix:
     """Test IoU matrix computation."""
 

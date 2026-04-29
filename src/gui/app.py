@@ -218,6 +218,29 @@ class SegOidApp:
         self.schema_label.pack_forget()
         self.schema_entry.pack_forget()
 
+        # Fluorescence markers section (collapsible)
+        self.detect_markers = CheckboxOption(
+            options_frame,
+            label="Detect fluorescence markers (companion images <base>_<marker>.tif)",
+            initial_value=False,
+            on_change=self._on_marker_toggle,
+        )
+        self.detect_markers.pack(anchor=tk.W, pady=(10, 0))
+
+        self.markers_frame = ttk.Frame(options_frame)
+        self.markers_frame.pack(fill=tk.X, pady=5)
+
+        self.markers_label = ttk.Label(
+            self.markers_frame,
+            text="Marker names (comma-separated):",
+        )
+        self.markers_entry = ttk.Entry(self.markers_frame, width=40)
+        self.markers_entry.insert(0, "green, red")
+
+        # Initially hidden
+        self.markers_label.pack_forget()
+        self.markers_entry.pack_forget()
+
         # Buttons
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=10)
@@ -300,6 +323,15 @@ class SegOidApp:
             self.schema_label.pack_forget()
             self.schema_entry.pack_forget()
 
+    def _on_marker_toggle(self, enabled: bool):
+        """Handle fluorescence marker detection toggle."""
+        if enabled:
+            self.markers_label.pack(side=tk.LEFT, padx=(20, 5))
+            self.markers_entry.pack(side=tk.LEFT)
+        else:
+            self.markers_label.pack_forget()
+            self.markers_entry.pack_forget()
+
     def _get_model_path(self) -> Optional[Path]:
         """Get the model path to use."""
         if self.use_custom_model.get():
@@ -375,6 +407,11 @@ class SegOidApp:
                 self.cancel_btn.config(state=tk.DISABLED)
                 return
 
+        # Get fluorescence markers if enabled
+        markers = None
+        if self.detect_markers.get():
+            markers = [m.strip() for m in self.markers_entry.get().split(",") if m.strip()]
+
         # Create and start job
         self.current_job = InferenceJob(
             input_folder=self.input_picker.get(),
@@ -387,6 +424,7 @@ class SegOidApp:
             filename_schema=filename_schema,
             pixel_size=pixel_size,
             histogram_reference_path=histogram_reference_path,
+            markers=markers,
         )
         self.current_job.start()
 

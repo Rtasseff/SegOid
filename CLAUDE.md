@@ -82,3 +82,22 @@ If a `LOCAL_SETUP.md` file exists in the project root (gitignored, machine-speci
 - **Images:** TIFF, RGB or grayscale
 - **Masks:** Binary 0/255, named `<basename>_mask.tif`
 - **Manifests:** CSV with `basename,image_path,mask_path,pixel_size`
+
+## Workflow: post-segmentation analysis
+
+Downstream of the inference metrics CSV, the `post_seg_analyze` console script (and the Colab notebook at `colab/post_segmentation.ipynb`) groups, filters, and exports a multi-tab Excel for inspection or GraphPad import. Single canonical workflow:
+
+1. Run SegOid with **"Parse filename into fields"** enabled in the GUI so the metrics CSV has metadata columns (e.g., `condition`, `parameters`).
+2. Run `post_seg_analyze --metrics metrics.csv --output post_seg.xlsx --group-by <cols>` (or use the Colab notebook).
+3. Output: per-group tabs + `all_with_filter_status` + `group_stats` + `graphpad_long`.
+
+The post-seg script does not re-parse filenames. Grouping columns must already exist in the input CSV; if not, the script errors with a pointer back to the GUI checkbox.
+
+## Workflow: fluorescence companion images
+
+For brightfield + fluorescence pairs (e.g., live/dead assays):
+
+- Drop base images and companion images in the same folder. Naming: `<base>.tif` plus `<base>_<marker>.tif` (e.g., `well_A1.tif`, `well_A1_green.tif`, `well_A1_red.tif`).
+- Companions must be **single-channel grayscale TIFFs** (the standard quantitative-microscopy export). Multi-channel files are rejected.
+- In the GUI, enable **"Detect fluorescence markers"** and enter marker names (e.g. `green, red`). For CLI: `quantify_objects --markers green,red`.
+- Companions are excluded from inference and used only at metrics time. Per-object `mean_intensity_<marker>` columns are added to the metrics CSV. Missing companions become NaN with a warning, not an error.

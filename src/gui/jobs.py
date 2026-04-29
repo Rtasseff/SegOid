@@ -40,6 +40,7 @@ class InferenceJob:
         filename_schema: Optional[dict] = None,
         pixel_size: Optional[float] = None,
         histogram_reference_path: Optional[str] = None,
+        markers: Optional[List[str]] = None,
     ):
         """
         Initialize inference job.
@@ -55,6 +56,9 @@ class InferenceJob:
             filename_schema: Optional dict with 'labels' for filename parsing
             pixel_size: Optional pixel size in µm/pixel for scaling metrics
             histogram_reference_path: Optional path to reference image for histogram matching
+            markers: Optional list of fluorescence marker suffix names. When set,
+                files matching <base>_<marker>.<ext> are companions, excluded from
+                inference and used to compute mean_intensity_<marker> per object.
         """
         self.input_folder = Path(input_folder)
         self.output_folder = Path(output_folder)
@@ -66,6 +70,8 @@ class InferenceJob:
         self.filename_schema = filename_schema
         self.pixel_size = pixel_size
         self.histogram_reference_path = Path(histogram_reference_path) if histogram_reference_path else None
+        self.markers: List[str] = [m.strip() for m in (markers or []) if m and m.strip()]
+        self._companions: dict = {}  # marker -> {base_stem: path}
 
         self._thread: Optional[threading.Thread] = None
         self._cancelled = False
@@ -168,10 +174,30 @@ class InferenceJob:
             self._complete(False, f"Error: {e}")
 
     def _scan_images(self) -> List[Path]:
-        """Scan input folder for image files."""
-        from src.data.manifest import scan_folder_for_images
+        """Scan input folder for image files.
 
-        return scan_folder_for_images(self.input_folder)
+        When markers are declared, companion images (``<base>_<marker>.<ext>``)
+        are split out from the inference list and stashed for later metrics
+        computation. Companions are NOT predicted on.
+        """
+        from src.data.manifest import classify_companions, scan_folder_for_images
+
+        all_files = scan_folder_for_images(self.input_folder)
+        if not self.markers:
+            self._companions = {}
+            return all_files
+
+        base_files, self._companions = classify_companions(all_files, self.markers)
+        for marker in self.markers:
+            present = sum(1 for b in base_files if b.stem in self._companions[marker])
+            missing = len(base_files) - present
+            if missing > 0:
+                self._log(
+                    f"Marker '{marker}': {missing} / {len(base_files)} base images "
+                    f"missing companion file (will be NA in metrics)",
+                    "WARNING",
+                )
+        return base_files
 
     def _load_model(self):
         """Load the ONNX model."""
@@ -215,6 +241,9 @@ class InferenceJob:
             if self.pixel_size:
                 self._log(f"Scaling metrics to µm (pixel size: {self.pixel_size} µm/px)")
 
+            if self.markers:
+                self._log(f"Computing mean intensity for markers: {', '.join(self.markers)}")
+
             all_objects = []
 
             for mask_path in mask_paths:
@@ -228,8 +257,19 @@ class InferenceJob:
                     labeled, n_objects = extract_objects(mask, min_area=100)
 
                     if n_objects > 0:
-                        props = compute_object_properties(labeled, pixel_size=self.pixel_size)
+                        companions = self._load_companions_for(basename, labeled.shape)
+                        props = compute_object_properties(
+                            labeled,
+                            pixel_size=self.pixel_size,
+                            companions=companions or None,
+                        )
                         props["image"] = basename
+
+                        # Mark missing companions as NaN explicitly so the column is present
+                        for marker in self.markers:
+                            col = f"mean_intensity_{marker}"
+                            if col not in props.columns:
+                                props[col] = float("nan")
 
                         # Add filename metadata if schema provided
                         if self.filename_schema and self.filename_schema.get("labels"):
@@ -260,6 +300,32 @@ class InferenceJob:
 
         except Exception as e:
             self._log(f"Metrics computation failed: {e}", "ERROR")
+
+    def _load_companions_for(self, basename: str, expected_shape) -> dict:
+        """Return ``{marker: 2D ndarray}`` for companions present for this base image.
+
+        Markers without a companion file for ``basename`` are omitted (they
+        become NaN in the output via the caller's column-fill step).
+        """
+        if not self.markers:
+            return {}
+
+        from src.inference.predict import imread
+
+        out = {}
+        for marker in self.markers:
+            companion_path = self._companions.get(marker, {}).get(basename)
+            if companion_path is None:
+                continue
+            try:
+                img = imread(companion_path)
+                out[marker] = img
+            except Exception as e:
+                self._log(
+                    f"Failed to load companion '{marker}' for {basename}: {e}",
+                    "WARNING",
+                )
+        return out
 
     def _add_filename_metadata(self, df: pd.DataFrame, basename: str):
         """Add metadata columns from filename parsing."""
