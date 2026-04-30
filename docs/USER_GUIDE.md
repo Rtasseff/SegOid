@@ -138,7 +138,7 @@ In the SegOid project's GitHub page, look for the **"Open In Colab"** badge in t
 
 (Direct link: [Google Colab - Rtasseff/SegOid.](https://colab.research.google.com/github/Rtasseff/SegOid/blob/main/colab/post_segmentation.ipynb))
 
-> [Screenshot: Colab open with the SegOid notebook]
+> ![Screenshot: Colab open with the SegOid notebook](../assets/screenshot_colab.png)
 
 ### 2b. Run the install step
 
