@@ -40,7 +40,7 @@ source .venv/bin/activate
 
 # Export PyTorch model to ONNX format
 export_onnx \
-    --checkpoint runs/train_20260216_173233/checkpoints/best_model.pth \
+    --checkpoint models/production_v2.0/checkpoints/best_model.pth \
     --output assets/segoid_model.onnx
 ```
 

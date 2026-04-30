@@ -1,20 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec file for SegOid Windows executable.
+PyInstaller spec file for the SegOid Windows executable.
 
-Build with:
-    pyinstaller --clean --noconfirm segoid_gui.spec
+For build instructions (prerequisites, environment setup, the exact command
+to run, and troubleshooting), see docs/WINDOWS_DESKTOP_BUNDLE.md.
 
-Prerequisites:
-    1. Export ONNX model first:
-       export_onnx --checkpoint models/production_v2.0/checkpoints/best_model.pth \
-                   --output assets/segoid_model.onnx
-
-    2. Install PyInstaller:
-       pip install pyinstaller
-
-Output:
-    dist/SegOid.exe (~100-200MB)
+This file is a build recipe consumed by PyInstaller, not a how-to. Keeping
+the user-facing instructions in one place (the doc) prevents the two from
+drifting out of sync.
 """
 
 import sys

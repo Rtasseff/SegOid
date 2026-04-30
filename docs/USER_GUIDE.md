@@ -136,7 +136,7 @@ This step doesn't need anything installed on your computer — it runs in Google
 
 In the SegOid project's GitHub page, look for the **"Open In Colab"** badge in the `colab/` folder. Click it. Your browser will open the notebook.
 
-(Direct link: search the GitHub page for the file `colab/post_segmentation.ipynb` and click "Open in Colab" at the top.)
+(Direct link: [Google Colab - Rtasseff/SegOid.](https://colab.research.google.com/github/Rtasseff/SegOid/blob/main/colab/post_segmentation.ipynb))
 
 > [Screenshot: Colab open with the SegOid notebook]
 
