@@ -150,6 +150,31 @@ def test_per_group_tabs_only_passed_rows():
     assert len(tabs["drug"]) == 2
 
 
+def test_per_group_tabs_empty_when_all_filtered():
+    """When every row in a group fails the filter, the tab still appears
+    (with header columns only) so the user can see the group existed."""
+    df = _sample_metrics()
+    df["passed_filter"] = False  # nothing passes
+    tabs = _per_group_tabs(df, ["condition"], list(df.columns))
+    assert set(tabs.keys()) == {"ctrl", "drug"}
+    assert len(tabs["ctrl"]) == 0
+    assert len(tabs["drug"]) == 0
+    # Columns present so the user sees the schema even with no rows
+    assert "object_id" in tabs["ctrl"].columns
+    assert "circularity" in tabs["drug"].columns
+
+
+def test_per_group_tabs_partial_filter_one_group_empty():
+    """Mixed: ctrl group has rows passing, drug group is fully filtered out.
+    Both tabs should appear; drug should be empty."""
+    df = _sample_metrics()
+    df["passed_filter"] = [True, True, True, False, False, False]
+    tabs = _per_group_tabs(df, ["condition"], list(df.columns))
+    assert set(tabs.keys()) == {"ctrl", "drug"}
+    assert len(tabs["ctrl"]) == 3
+    assert len(tabs["drug"]) == 0
+
+
 def test_graphpad_long_no_duplicate_object_id():
     df = _sample_metrics()
     df["passed_filter"] = True
@@ -215,6 +240,39 @@ def test_run_default_group_by_is_image(tmp_path, tmp_metrics_csv):
     sheet_names = wb.sheetnames
     assert any("A" in s for s in sheet_names)
     assert any("B" in s for s in sheet_names)
+
+
+def test_run_prints_pass_rate(tmp_path, tmp_metrics_csv, capsys):
+    """The run summary should always print n/total passed."""
+    out = tmp_path / "post_seg.xlsx"
+    cfg = PostSegConfig(metrics_csv=tmp_metrics_csv, output_xlsx=out)
+    run(cfg)
+    captured = capsys.readouterr()
+    # No filters → all 6 sample rows pass
+    assert "Filter: 6/6 rows passed." in captured.out
+
+
+def test_run_warns_when_all_filtered(tmp_path, tmp_metrics_csv, capsys):
+    """When all rows are excluded, print a loud warning pointing the user
+    at all_with_filter_status, so they don't quietly get empty tabs."""
+    out = tmp_path / "post_seg.xlsx"
+    cfg = PostSegConfig(
+        metrics_csv=tmp_metrics_csv, output_xlsx=out, group_by=["condition"],
+        circularity_min=10.0,  # impossible — circularity is 0..1
+    )
+    run(cfg)
+    captured = capsys.readouterr()
+    assert "Filter: 0/6 rows passed." in captured.out
+    assert "WARNING" in captured.out
+    assert "all_with_filter_status" in captured.out
+
+    # And the per-group tabs still exist (empty), not silently dropped.
+    wb = load_workbook(out)
+    assert "ctrl" in wb.sheetnames
+    assert "drug" in wb.sheetnames
+    ctrl = pd.read_excel(out, sheet_name="ctrl")
+    assert len(ctrl) == 0
+    assert "object_id" in ctrl.columns
 
 
 def test_excel_writer_safe_sheet_name(tmp_path):

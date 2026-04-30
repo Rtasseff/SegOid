@@ -72,18 +72,23 @@ def _ordered_columns(df: pd.DataFrame, group_by: List[str]) -> List[str]:
 def _per_group_tabs(
     df: pd.DataFrame, group_by: List[str], col_order: List[str]
 ) -> Dict[str, pd.DataFrame]:
-    """Split filtered (passed_filter=True) rows into per-group DataFrames.
+    """Split passed_filter=True rows into per-group DataFrames.
 
-    Returns dict mapping group label → DataFrame in canonical column order.
+    Iterates groups present in the *unfiltered* data, then drops to only-passed
+    rows within each. A group whose rows were all filtered out still produces
+    an empty tab (header row only) so the user can see the group existed and
+    adjust their filters — silently dropping the tab caused real confusion.
     """
     out: Dict[str, pd.DataFrame] = {}
-    filtered = df[df["passed_filter"]].copy() if "passed_filter" in df.columns else df.copy()
-    for keys, sub in filtered.groupby(group_by, dropna=False):
+    has_filter = "passed_filter" in df.columns
+    for keys, sub in df.groupby(group_by, dropna=False):
         if not isinstance(keys, tuple):
             keys = (keys,)
         label = "_".join("NA" if pd.isna(k) else str(k) for k in keys)
         if not label:
             label = "all"
+        if has_filter:
+            sub = sub[sub["passed_filter"]]
         cols = [c for c in col_order if c in sub.columns]
         out[label] = sub[cols].reset_index(drop=True)
     return out
@@ -145,6 +150,21 @@ def run(config: PostSegConfig) -> Path:
     sheets["all_with_filter_status"] = df[col_order]
     sheets["group_stats"] = group_descriptive_stats(df, config.group_by, metric_cols)
     sheets["graphpad_long"] = _graphpad_long(df, config.group_by)
+
+    # Visible pass-rate summary so users notice over-aggressive filters before
+    # opening the Excel and being confused by empty per-group tabs.
+    total = len(df)
+    passed = int(df["passed_filter"].sum()) if "passed_filter" in df.columns else total
+    print(f"Filter: {passed}/{total} rows passed.")
+    if total > 0 and passed == 0:
+        print(
+            "WARNING: All rows were excluded by your filters. Per-group tabs "
+            "and graphpad_long will only have header rows."
+        )
+        print(
+            "         Open the 'all_with_filter_status' tab to see what was "
+            "excluded, then loosen the filter values that don't fit your data."
+        )
 
     write_multitab_excel(config.output_xlsx, sheets)
     return config.output_xlsx
