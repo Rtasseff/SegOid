@@ -1,5 +1,7 @@
 # SegOid User Guide
 
+References SegOid v 3.0.0
+
 A friendly walkthrough for researchers using SegOid to analyze spheroid images. This guide covers the two-step workflow: running the SegOid program on your images, then analyzing the results in your browser.
 
 No coding required.
@@ -53,7 +55,7 @@ This step finds the spheroids and produces the measurements file.
 
 Double-click `SegOid.exe`. A window opens.
 
-> [Screenshot: SegOid main window]
+> ![Screenshot: SegOid main window](../assets/screenshot_SegOid.png)
 
 ### 1b. Pick your input folder
 

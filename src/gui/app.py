@@ -55,8 +55,8 @@ class SegOidApp:
         """
         self.root = root
         self.root.title("SegOid Inference")
-        self.root.geometry("800x600")
-        self.root.minsize(700, 500)
+        self.root.geometry("850x800")
+        self.root.minsize(700, 450)
 
         # State
         self.current_job: Optional[InferenceJob] = None
@@ -85,8 +85,48 @@ class SegOidApp:
         )
         title.pack(pady=(0, 10))
 
+        # Scrollable middle area for the controls. The Run/Cancel buttons and
+        # the Log stay outside this region so they're always visible — even
+        # when the window is too small for all the option sections to fit.
+        scroll_outer = ttk.Frame(main_frame)
+        scroll_outer.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        self._scroll_canvas = tk.Canvas(scroll_outer, highlightthickness=0)
+        scroll_bar = ttk.Scrollbar(
+            scroll_outer, orient=tk.VERTICAL, command=self._scroll_canvas.yview
+        )
+        self._scroll_canvas.configure(yscrollcommand=scroll_bar.set)
+        scroll_bar.pack(side=tk.RIGHT, fill=tk.Y)
+        self._scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scroll_inner = ttk.Frame(self._scroll_canvas)
+        self._scroll_inner_id = self._scroll_canvas.create_window(
+            (0, 0), window=scroll_inner, anchor="nw"
+        )
+
+        # Resize the inner frame to match the canvas width, and update the
+        # scroll region whenever the inner frame's height changes.
+        scroll_inner.bind(
+            "<Configure>",
+            lambda _: self._scroll_canvas.configure(
+                scrollregion=self._scroll_canvas.bbox("all")
+            ),
+        )
+        self._scroll_canvas.bind(
+            "<Configure>",
+            lambda e: self._scroll_canvas.itemconfig(
+                self._scroll_inner_id, width=e.width
+            ),
+        )
+
+        # Mouse-wheel scrolling. Bind only while the cursor is over the
+        # scrollable area so the wheel still works in the Log box below.
+        self._scroll_canvas.bind("<Enter>", self._scroll_bind_wheel)
+        self._scroll_canvas.bind("<Leave>", self._scroll_unbind_wheel)
+
+        # All the option sections below live inside this scrollable inner frame.
         # Model selection section
-        model_frame = ttk.LabelFrame(main_frame, text="Model", padding=10)
+        model_frame = ttk.LabelFrame(scroll_inner, text="Model", padding=10)
         model_frame.pack(fill=tk.X, pady=5)
 
         self.model_status = ttk.Label(model_frame, text="Bundled model: checking...")
@@ -113,7 +153,7 @@ class SegOidApp:
         self.model_picker.browse_btn.config(state=tk.DISABLED)
 
         # Input/Output section
-        io_frame = ttk.LabelFrame(main_frame, text="Input / Output", padding=10)
+        io_frame = ttk.LabelFrame(scroll_inner, text="Input / Output", padding=10)
         io_frame.pack(fill=tk.X, pady=5)
 
         self.input_picker = FolderPicker(
@@ -129,7 +169,7 @@ class SegOidApp:
         self.output_picker.pack(fill=tk.X, pady=2)
 
         # Inference Settings section
-        inference_frame = ttk.LabelFrame(main_frame, text="Inference Settings", padding=10)
+        inference_frame = ttk.LabelFrame(scroll_inner, text="Inference Settings", padding=10)
         inference_frame.pack(fill=tk.X, pady=5)
 
         # Pixel size for multi-resolution inference
@@ -178,7 +218,7 @@ class SegOidApp:
         ).pack(anchor=tk.W, pady=(2, 0))
 
         # Options section
-        options_frame = ttk.LabelFrame(main_frame, text="Options", padding=10)
+        options_frame = ttk.LabelFrame(scroll_inner, text="Options", padding=10)
         options_frame.pack(fill=tk.X, pady=5)
 
         self.compute_metrics = CheckboxOption(
@@ -268,18 +308,43 @@ class SegOidApp:
         )
         self.open_output_btn.pack(side=tk.RIGHT, padx=5)
 
-        # Log area
+        # Log area (always visible, fixed height; ScrolledText scrolls internally
+        # for long logs). Not expand=True so the scrollable controls region
+        # above gets the bulk of the vertical space.
         log_frame = ttk.LabelFrame(main_frame, text="Log", padding=5)
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        log_frame.pack(fill=tk.X, pady=5)
 
-        self.log_text = ScrolledText(log_frame, height=12)
-        self.log_text.pack(fill=tk.BOTH, expand=True)
+        self.log_text = ScrolledText(log_frame, height=10)
+        self.log_text.pack(fill=tk.X)
 
         # Initialize log handler
         self.log_handler = GUILogHandler(
             text_widget=self.log_text.get_text_widget(),
             root=self.root,
         )
+
+    def _scroll_on_wheel(self, event):
+        """Scroll the controls canvas in response to mouse wheel events."""
+        if event.num == 4:                       # Linux scroll up
+            self._scroll_canvas.yview_scroll(-1, "units")
+        elif event.num == 5:                     # Linux scroll down
+            self._scroll_canvas.yview_scroll(1, "units")
+        elif getattr(event, "delta", 0):         # Windows / macOS
+            # delta is typically ±120 per notch on Windows; on macOS it's
+            # smaller per-tick but the sign convention is the same.
+            self._scroll_canvas.yview_scroll(int(-event.delta / 120), "units")
+
+    def _scroll_bind_wheel(self, _event):
+        """Capture mouse wheel events while the cursor is over the canvas."""
+        self._scroll_canvas.bind_all("<MouseWheel>", self._scroll_on_wheel)
+        self._scroll_canvas.bind_all("<Button-4>", self._scroll_on_wheel)
+        self._scroll_canvas.bind_all("<Button-5>", self._scroll_on_wheel)
+
+    def _scroll_unbind_wheel(self, _event):
+        """Release mouse wheel binding so other widgets (e.g. log) can scroll."""
+        self._scroll_canvas.unbind_all("<MouseWheel>")
+        self._scroll_canvas.unbind_all("<Button-4>")
+        self._scroll_canvas.unbind_all("<Button-5>")
 
     def _check_bundled_model(self):
         """Check for bundled model and update status."""
